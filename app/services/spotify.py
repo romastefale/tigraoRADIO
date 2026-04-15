@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import base64
 from typing import Any
+from urllib.parse import quote  # ← ADICIONADO
 
 import httpx
 
@@ -34,7 +35,7 @@ class SpotifyService:
             f"?client_id={SPOTIFY_CLIENT_ID}"
             "&response_type=code"
             f"&redirect_uri={redirect_uri}"
-            f"&scope={SPOTIFY_SCOPES}"
+            f"&scope={quote(SPOTIFY_SCOPES)}"  # ← CORREÇÃO
             f"&state={user_id}"
         )
 
