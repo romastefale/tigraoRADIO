@@ -41,11 +41,11 @@ def spotify_login() -> RedirectResponse:
 
 
 @app.get("/callback")
-def spotify_callback(code: str, db: Session = Depends(get_db)) -> dict[str, str]:
-    exchange_code_for_token(db, code)
+def spotify_callback(code: str, user_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
+    exchange_code_for_token(db, code, user_id)
     return {"status": "ok", "message": "Spotify OAuth completed and tokens saved."}
 
 
 @app.get("/spotify/track")
-def spotify_track(db: Session = Depends(get_db)) -> dict[str, str | None]:
-    return get_current_or_last_played(db)
+def spotify_track(user_id: int, db: Session = Depends(get_db)) -> dict[str, str | None]:
+    return get_current_or_last_played(db, user_id)

@@ -72,16 +72,17 @@ def build_auth_url() -> str:
 
 def save_token(
     db: Session,
+    user_id: int,
     access_token: str,
     refresh_token: str,
     expires_in: int,
 ) -> SpotifyToken:
     expiration = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
-    token_row = db.get(SpotifyToken, 1)
+    token_row = db.query(SpotifyToken).filter(SpotifyToken.user_id == user_id).first()
 
     if token_row is None:
         token_row = SpotifyToken(
-            id=1,
+            user_id=user_id,
             access_token=access_token,
             refresh_token=refresh_token,
             expiration=expiration,
@@ -97,7 +98,7 @@ def save_token(
     return token_row
 
 
-def exchange_code_for_token(db: Session, code: str) -> SpotifyToken:
+def exchange_code_for_token(db: Session, code: str, user_id: int) -> SpotifyToken:
     if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
         raise HTTPException(status_code=500, detail="Spotify client credentials are not configured")
 
@@ -120,14 +121,15 @@ def exchange_code_for_token(db: Session, code: str) -> SpotifyToken:
 
     return save_token(
         db=db,
+        user_id=user_id,
         access_token=payload["access_token"],
         refresh_token=payload["refresh_token"],
         expires_in=payload["expires_in"],
     )
 
 
-def refresh_token_if_needed(db: Session) -> SpotifyToken:
-    token_row = db.get(SpotifyToken, 1)
+def refresh_token_if_needed(db: Session, user_id: int) -> SpotifyToken:
+    token_row = db.query(SpotifyToken).filter(SpotifyToken.user_id == user_id).first()
     if token_row is None:
         raise HTTPException(status_code=404, detail="No Spotify token found. Complete OAuth login first.")
 
@@ -156,6 +158,7 @@ def refresh_token_if_needed(db: Session) -> SpotifyToken:
     new_refresh_token = payload.get("refresh_token", token_row.refresh_token)
     return save_token(
         db=db,
+        user_id=user_id,
         access_token=payload["access_token"],
         refresh_token=new_refresh_token,
         expires_in=payload["expires_in"],
@@ -178,8 +181,8 @@ def _map_track(item: dict[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
-def get_current_track(db: Session) -> dict[str, Any] | None:
-    token_row = refresh_token_if_needed(db)
+def get_current_track(db: Session, user_id: int) -> dict[str, Any] | None:
+    token_row = refresh_token_if_needed(db, user_id)
 
     status, payload = _spotify_request(
         NOW_PLAYING_URL,
@@ -193,7 +196,7 @@ def get_current_track(db: Session) -> dict[str, Any] | None:
         return None
 
     if status == 401:
-        token_row = refresh_token_if_needed(db)
+        token_row = refresh_token_if_needed(db, user_id)
         status, payload = _spotify_request(
             NOW_PLAYING_URL,
             headers={"Authorization": f"Bearer {token_row.access_token}"},
@@ -204,8 +207,8 @@ def get_current_track(db: Session) -> dict[str, Any] | None:
     raise HTTPException(status_code=400, detail=f"Spotify current track lookup failed: {payload}")
 
 
-def get_last_played_track(db: Session) -> dict[str, Any] | None:
-    token_row = refresh_token_if_needed(db)
+def get_last_played_track(db: Session, user_id: int) -> dict[str, Any] | None:
+    token_row = refresh_token_if_needed(db, user_id)
 
     status, payload = _spotify_request(
         RECENTLY_PLAYED_URL,
@@ -221,12 +224,12 @@ def get_last_played_track(db: Session) -> dict[str, Any] | None:
     raise HTTPException(status_code=400, detail=f"Spotify recently played lookup failed: {payload}")
 
 
-def get_current_or_last_played(db: Session) -> dict[str, Any]:
-    current = get_current_track(db)
+def get_current_or_last_played(db: Session, user_id: int) -> dict[str, Any]:
+    current = get_current_track(db, user_id)
     if current:
         return {"source": "currently_playing", **current}
 
-    last_played = get_last_played_track(db)
+    last_played = get_last_played_track(db, user_id)
     if last_played:
         return {"source": "recently_played", **last_played}
 
