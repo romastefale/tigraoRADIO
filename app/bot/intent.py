@@ -1,19 +1,7 @@
 def detect_intent(text: str) -> str | None:
-    text = text.lower().strip()
+    normalized = text.lower().strip()
 
-    if any(p in text for p in ["tocando", "ouvindo", "agora", "musica", "som"]):
+    if any(phrase in normalized for phrase in ["tocando", "ouvindo", "agora", "musica", "música", "som", "play"]):
         return "play"
-
-    if any(p in text for p in ["album", "disco"]):
-        return "album"
-
-    if any(p in text for p in ["artista", "banda"]):
-        return "artist"
-
-    if any(p in text for p in ["top", "favoritas", "ranking"]):
-        return "ranking"
-
-    if any(p in text for p in ["grupo", "galera"]):
-        return "geeknow"
 
     return None

@@ -35,7 +35,6 @@ AUTH_URL = "https://accounts.spotify.com/authorize"
 TOKEN_URL = "https://accounts.spotify.com/api/token"
 NOW_PLAYING_URL = "https://api.spotify.com/v1/me/player/currently-playing"
 RECENTLY_PLAYED_URL = "https://api.spotify.com/v1/me/player/recently-played?limit=1"
-TOP_TRACKS_URL = "https://api.spotify.com/v1/me/top/tracks?limit=5"
 RETRYABLE_STATUSES = {429, 500, 502, 503}
 MAX_RETRIES = 4
 BACKOFF_BASE_SECONDS = 0.5
@@ -203,15 +202,6 @@ class SpotifyService:
             while len(self._cache) > SPOTIFY_CACHE_MAX_ENTRIES:
                 self._cache.popitem(last=False)
 
-    def _safe_fallback_track(self, source: str) -> dict[str, Any]:
-        return {
-            "source": source,
-            "track_name": "Unavailable",
-            "artist": "Unavailable",
-            "album": "Unavailable",
-            "album_cover_url": None,
-        }
-
     def build_auth_url(self, user_id: int) -> str:
         if not SPOTIFY_CLIENT_ID:
             raise HTTPException(status_code=500, detail="SPOTIFY_CLIENT_ID is not configured")
@@ -342,19 +332,34 @@ class SpotifyService:
         album = item.get("album", {})
         if not isinstance(album, dict):
             album = {}
+
         artists_source = item.get("artists", [])
         if not isinstance(artists_source, list):
             artists_source = []
         artists = [artist.get("name") for artist in artists_source if isinstance(artist, dict) and artist.get("name")]
-        images = album.get("images", [])
-        if not isinstance(images, list):
-            images = []
+
+        images_source = album.get("images", [])
+        images = images_source if isinstance(images_source, list) else []
+        highest_res_image = None
+        if images:
+            sorted_images = sorted(
+                (img for img in images if isinstance(img, dict) and img.get("url")),
+                key=lambda img: int(img.get("width") or 0),
+                reverse=True,
+            )
+            if sorted_images:
+                highest_res_image = sorted_images[0].get("url")
+
+        external_urls = item.get("external_urls", {})
+        if not isinstance(external_urls, dict):
+            external_urls = {}
 
         return {
             "track_name": item.get("name"),
             "artist": ", ".join(artists),
             "album": album.get("name"),
-            "album_cover_url": images[0].get("url") if images else None,
+            "album_image_url": highest_res_image,
+            "spotify_url": external_urls.get("spotify"),
         }
 
     async def get_current_track(self, db: Session, user_id: int) -> dict[str, Any] | None:
@@ -412,7 +417,7 @@ class SpotifyService:
         logger.warning("Recently played lookup failed for user_id=%s status=%s payload=%s", user_id, status, payload)
         return None
 
-    async def get_current_or_last_played(self, db: Session, user_id: int) -> dict[str, Any]:
+    async def get_current_or_last_played(self, db: Session, user_id: int) -> dict[str, Any] | None:
         cache_key = "play"
         cached = await self._get_cached(user_id, cache_key)
         if cached:
@@ -421,103 +426,17 @@ class SpotifyService:
         try:
             current = await self.get_current_track(db, user_id)
             if current:
-                result = {"source": "currently_playing", **current}
-                await self._set_cache(user_id, cache_key, result)
-                return result
+                await self._set_cache(user_id, cache_key, current)
+                return current
 
             last_played = await self.get_last_played_track(db, user_id)
             if last_played:
-                result = {"source": "recently_played", **last_played}
-                await self._set_cache(user_id, cache_key, result)
-                return result
+                await self._set_cache(user_id, cache_key, last_played)
+                return last_played
         except Exception as exc:  # noqa: BLE001
             logger.exception("Track lookup failed for user_id=%s", user_id, exc_info=exc)
 
-        return self._safe_fallback_track("fallback")
-
-    async def get_album_info(self, db: Session, user_id: int) -> dict[str, Any]:
-        cache_key = "album"
-        cached = await self._get_cached(user_id, cache_key)
-        if cached:
-            return cached
-
-        track = await self.get_current_or_last_played(db, user_id)
-        payload = {
-            "album": track.get("album"),
-            "artist": track.get("artist"),
-            "track_name": track.get("track_name"),
-            "album_cover_url": track.get("album_cover_url"),
-            "source": track.get("source"),
-        }
-        await self._set_cache(user_id, cache_key, payload)
-        return payload
-
-    async def get_artist_info(self, db: Session, user_id: int) -> dict[str, Any]:
-        cache_key = "artist"
-        cached = await self._get_cached(user_id, cache_key)
-        if cached:
-            return cached
-
-        track = await self.get_current_or_last_played(db, user_id)
-        payload = {
-            "artist": track.get("artist"),
-            "track_name": track.get("track_name"),
-            "album": track.get("album"),
-            "source": track.get("source"),
-        }
-        await self._set_cache(user_id, cache_key, payload)
-        return payload
-
-    async def get_top_tracks(self, db: Session, user_id: int) -> dict[str, Any]:
-        cache_key = "ranking"
-        cached = await self._get_cached(user_id, cache_key)
-        if cached:
-            return cached
-
-        try:
-            token_row = await self.refresh_token_if_needed(db, user_id)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to refresh token for top tracks user_id=%s", user_id, exc_info=exc)
-            return {"tracks": []}
-        status, payload = await self._request_with_retry(
-            TOP_TRACKS_URL,
-            headers={"Authorization": f"Bearer {token_row.access_token}"},
-            user_id=user_id,
-        )
-
-        if status != 200 or payload is None:
-            logger.warning("Top tracks lookup failed for user_id=%s status=%s payload=%s", user_id, status, payload)
-            return {"tracks": []}
-
-        tracks: list[dict[str, Any]] = []
-        payload_items = payload.get("items", []) if isinstance(payload, dict) else []
-        if not isinstance(payload_items, list):
-            payload_items = []
-        for item in payload_items:
-            if not isinstance(item, dict):
-                continue
-            artists_source = item.get("artists", [])
-            if not isinstance(artists_source, list):
-                artists_source = []
-            artists = [
-                artist.get("name")
-                for artist in artists_source
-                if isinstance(artist, dict) and artist.get("name")
-            ]
-            album = item.get("album", {})
-            if not isinstance(album, dict):
-                album = {}
-            tracks.append(
-                {
-                    "track_name": item.get("name"),
-                    "artist": ", ".join(artists),
-                    "album": album.get("name"),
-                }
-            )
-
-        result = {"tracks": tracks}
-        await self._set_cache(user_id, cache_key, result)
-        return result
+        return None
 
 
 spotify_service = SpotifyService()

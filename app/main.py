@@ -64,23 +64,5 @@ async def spotify_callback(
 
 
 @app.get("/spotify/track")
-async def spotify_track(user_id: int, db: Session = Depends(get_db)) -> dict[str, str | None]:
+async def spotify_track(user_id: int, db: Session = Depends(get_db)) -> dict[str, str | None] | None:
     return await spotify_service.get_current_or_last_played(db, user_id)
-
-
-@app.get("/spotify/album")
-async def spotify_album(user_id: int, db: Session = Depends(get_db)) -> dict[str, str | None]:
-    return await spotify_service.get_album_info(db, user_id)
-
-
-@app.get("/spotify/artist")
-async def spotify_artist(user_id: int, db: Session = Depends(get_db)) -> dict[str, str | None]:
-    return await spotify_service.get_artist_info(db, user_id)
-
-
-@app.get("/spotify/ranking")
-async def spotify_ranking(user_id: int, db: Session = Depends(get_db)) -> dict[str, list[dict[str, str | None]]]:
-    return await spotify_service.get_top_tracks(db, user_id)
-from app.handlers.commands import router
-
-dp.include_router(router)
