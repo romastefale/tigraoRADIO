@@ -34,7 +34,9 @@ def _new_session() -> Session:
 
 async def _handle_spotify_error(message: Message, exc: Exception) -> None:
     logger.exception("Telegram command failed", exc_info=exc)
-    await message.answer(f"Request failed: {exc}")
+    await message.answer(
+        "Spotify is temporarily unavailable right now. Please try again in a few seconds."
+    )
 
 
 def _register_handlers(dp: Dispatcher) -> None:
