@@ -29,11 +29,11 @@ def _log_background_task_result(task: asyncio.Task[None], task_name: str) -> Non
 @app.on_event("startup")
 async def on_startup() -> None:
     init_db()
-    spotify_startup_task = asyncio.create_task(spotify_service.startup())
-    spotify_startup_task.add_done_callback(lambda task: _log_background_task_result(task, "spotify_startup"))
 
     telegram_startup_task = asyncio.create_task(startup_telegram_bot())
-    telegram_startup_task.add_done_callback(lambda task: _log_background_task_result(task, "telegram_startup"))
+    telegram_startup_task.add_done_callback(
+        lambda task: _log_background_task_result(task, "telegram_startup")
+    )
 
 
 @app.on_event("shutdown")
@@ -75,5 +75,7 @@ async def spotify_callback(
 
 
 @app.get("/spotify/track")
-async def spotify_track(user_id: int, db: Session = Depends(get_db)) -> dict[str, str | None] | None:
+async def spotify_track(
+    user_id: int, db: Session = Depends(get_db)
+) -> dict[str, str | None] | None:
     return await spotify_service.get_current_or_last_played(db, user_id)
