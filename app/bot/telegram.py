@@ -1,3 +1,5 @@
+from app.bot.intent import detect_intent
+from app.core.runtime import allow
 from __future__ import annotations
 
 import asyncio
@@ -117,8 +119,30 @@ def _register_handlers(dp: Dispatcher) -> None:
             db.close()
 
     @dp.message(F.text)
-    async def fallback(message: Message) -> None:
-        await message.answer("Unknown command. Use /start to see available commands.")
+async def natural_handler(message: Message) -> None:
+    if not message.text or not message.from_user:
+        return
+
+    user_id = message.from_user.id
+
+    if not allow(user_id):
+        return
+
+    intent = detect_intent(message.text)
+
+    if not intent:
+        return
+
+    # REDIRECIONAMENTO PARA SEUS COMANDOS EXISTENTES
+
+    if intent == "play":
+        await play(message)
+    elif intent == "album":
+        await album(message)
+    elif intent == "artist":
+        await artist(message)
+    elif intent == "ranking":
+        await ranking(message)
 
 
 async def startup_telegram_bot() -> None:
