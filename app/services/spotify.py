@@ -202,6 +202,26 @@ class SpotifyService:
             while len(self._cache) > SPOTIFY_CACHE_MAX_ENTRIES:
                 self._cache.popitem(last=False)
 
+    async def clear_user_session(self, db: Session, user_id: int) -> bool:
+        token_row = db.query(SpotifyToken).filter(SpotifyToken.user_id == user_id).first()
+        if token_row is None:
+            await self._clear_user_runtime_data(user_id)
+            return False
+
+        db.delete(token_row)
+        db.commit()
+        await self._clear_user_runtime_data(user_id)
+        return True
+
+    async def _clear_user_runtime_data(self, user_id: int) -> None:
+        async with self._cache_lock:
+            cache_keys = [cache_key for cache_key in self._cache if cache_key[0] == user_id]
+            for cache_key in cache_keys:
+                self._cache.pop(cache_key, None)
+
+        async with self._rate_limit_lock:
+            self._rate_limit.pop(user_id, None)
+
     def build_auth_url(self, user_id: int) -> str:
         if not SPOTIFY_CLIENT_ID:
             raise HTTPException(status_code=500, detail="SPOTIFY_CLIENT_ID is not configured")
