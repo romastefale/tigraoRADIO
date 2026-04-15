@@ -1,66 +1,58 @@
 from __future__ import annotations
 
 import logging
-
-from aiogram import Bot, Dispatcher
-from aiogram.filters import Command
-from aiogram.types import Message
-
-from app.config.settings import TELEGRAM_BOT_TOKEN
-
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
-bot: Bot | None = None
-dp: Dispatcher | None = None
 
+class SpotifyService:
+    def __init__(self) -> None:
+        # inicialização leve — sem rede, sem validação
+        pass
 
-async def startup_telegram_bot() -> None:
-    global bot, dp
+    async def startup(self) -> None:
+        logger.info("Spotify service started.")
 
-    if not TELEGRAM_BOT_TOKEN:
-        logger.warning("Telegram bot token not set. Skipping bot startup.")
-        return
-
-    bot = Bot(token=TELEGRAM_BOT_TOKEN)
-    dp = Dispatcher()
+    async def shutdown(self) -> None:
+        logger.info("Spotify service stopped.")
 
     # ========================
-    # COMMANDS
+    # AUTH
     # ========================
 
-    @dp.message(Command("start"))
-    async def start(message: Message) -> None:
-        await message.answer(
-            "🤖 Bot ativo!\n\nUse /play para ver a música atual."
-        )
+    def build_auth_url(self, user_id: int) -> str:
+        return f"/spotify/login?user_id={user_id}"
 
-    @dp.message(Command("help"))
-    async def help_cmd(message: Message) -> None:
-        await message.answer(
-            "Comandos disponíveis:\n"
-            "/start - iniciar\n"
-            "/play - ver música\n"
-            "/help - ajuda"
-        )
+    def resolve_user_id_from_state(self, state: str) -> int | None:
+        try:
+            return int(state)
+        except Exception:
+            return None
 
-    @dp.message(Command("play"))
-    async def play(message: Message) -> None:
-        await message.answer(
-            "🎧 Spotify ainda está sendo configurado..."
-        )
+    async def exchange_code_for_token(self, db, code: str, user_id: int) -> None:
+        logger.info("Token exchange skipped (safe mode).")
 
     # ========================
-    # START POLLING
+    # TRACK
     # ========================
 
-    logger.info("Starting Telegram bot polling...")
-    await dp.start_polling(bot)
+    async def get_current_or_last_played(
+        self, db, user_id: int
+    ) -> dict[str, Any] | None:
+        return {
+            "source": "last",
+            "played_at": None,
+            "track_name": "Spotify ainda não configurado",
+            "artist": "Sistema",
+            "album": "Inicialização",
+            "spotify_url": None,
+            "album_image_url": None,
+        }
+
+    async def clear_user_session(self, db, user_id: int) -> bool:
+        logger.info("Clear session called.")
+        return True
 
 
-async def shutdown_telegram_bot() -> None:
-    global bot
-
-    if bot:
-        await bot.session.close()
-        logger.info("Telegram bot stopped.")
+spotify_service = SpotifyService()
