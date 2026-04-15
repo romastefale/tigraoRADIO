@@ -1,5 +1,3 @@
-from app.bot.intent import detect_intent
-from app.core.runtime import allow
 from __future__ import annotations
 
 import asyncio
@@ -10,10 +8,11 @@ from aiogram.filters import Command
 from aiogram.types import Message
 from sqlalchemy.orm import Session
 
+from app.bot.intent import detect_intent
 from app.config.settings import TELEGRAM_BOT_TOKEN
+from app.core.runtime import allow
 from app.db.database import SessionLocal
 from app.services.spotify import spotify_service
-
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +72,10 @@ def _register_handlers(dp: Dispatcher) -> None:
         try:
             info = await spotify_service.get_album_info(db, user_id)
             await message.answer(
-                f"Album: {info.get('album')}\nArtist: {info.get('artist')}\n"
-                f"Track: {info.get('track_name')}\nSource: {info.get('source')}"
+                f"Album: {info.get('album')}\n"
+                f"Artist: {info.get('artist')}\n"
+                f"Track: {info.get('track_name')}\n"
+                f"Source: {info.get('source')}"
             )
         except Exception as exc:  # noqa: BLE001
             await _handle_spotify_error(message, exc)
@@ -88,8 +89,10 @@ def _register_handlers(dp: Dispatcher) -> None:
         try:
             info = await spotify_service.get_artist_info(db, user_id)
             await message.answer(
-                f"Artist: {info.get('artist')}\nTrack: {info.get('track_name')}\n"
-                f"Album: {info.get('album')}\nSource: {info.get('source')}"
+                f"Artist: {info.get('artist')}\n"
+                f"Track: {info.get('track_name')}\n"
+                f"Album: {info.get('album')}\n"
+                f"Source: {info.get('source')}"
             )
         except Exception as exc:  # noqa: BLE001
             await _handle_spotify_error(message, exc)
@@ -110,7 +113,8 @@ def _register_handlers(dp: Dispatcher) -> None:
             lines = ["Top tracks:"]
             for idx, track in enumerate(tracks, start=1):
                 lines.append(
-                    f"{idx}. {track.get('track_name')} — {track.get('artist')} ({track.get('album')})"
+                    f"{idx}. {track.get('track_name')} — "
+                    f"{track.get('artist')} ({track.get('album')})"
                 )
             await message.answer("\n".join(lines))
         except Exception as exc:  # noqa: BLE001
@@ -119,30 +123,27 @@ def _register_handlers(dp: Dispatcher) -> None:
             db.close()
 
     @dp.message(F.text)
-async def natural_handler(message: Message) -> None:
-    if not message.text or not message.from_user:
-        return
+    async def natural_handler(message: Message) -> None:
+        if not message.text or not message.from_user:
+            return
 
-    user_id = message.from_user.id
+        user_id = message.from_user.id
 
-    if not allow(user_id):
-        return
+        if not allow(user_id):
+            return
 
-    intent = detect_intent(message.text)
+        intent = detect_intent(message.text)
+        if not intent:
+            return
 
-    if not intent:
-        return
-
-    # REDIRECIONAMENTO PARA SEUS COMANDOS EXISTENTES
-
-    if intent == "play":
-        await play(message)
-    elif intent == "album":
-        await album(message)
-    elif intent == "artist":
-        await artist(message)
-    elif intent == "ranking":
-        await ranking(message)
+        if intent == "play":
+            await play(message)
+        elif intent == "album":
+            await album(message)
+        elif intent == "artist":
+            await artist(message)
+        elif intent == "ranking":
+            await ranking(message)
 
 
 async def startup_telegram_bot() -> None:
