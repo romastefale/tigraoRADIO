@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
+import hmac
+import json
 import logging
 from collections import OrderedDict, defaultdict, deque
 from dataclasses import dataclass
@@ -39,6 +42,7 @@ RETRYABLE_STATUSES = {429, 500, 502, 503}
 MAX_RETRIES = 4
 BACKOFF_BASE_SECONDS = 0.5
 GLOBAL_HTTP_TIMEOUT_SECONDS = min(SPOTIFY_HTTP_TIMEOUT_SECONDS, 10.0)
+STATE_TTL_SECONDS = 900
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +83,57 @@ class SpotifyService:
     def _basic_auth_header(self) -> str:
         creds = f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}".encode("utf-8")
         return "Basic " + base64.b64encode(creds).decode("utf-8")
+
+    def _build_state(self, user_id: int) -> str:
+        payload = {
+            "uid": user_id,
+            "ts": int(datetime.now(timezone.utc).timestamp()),
+        }
+        payload_json = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        payload_b64 = base64.urlsafe_b64encode(payload_json).decode("utf-8").rstrip("=")
+        signature = hmac.new(
+            SPOTIFY_CLIENT_SECRET.encode("utf-8"),
+            payload_b64.encode("utf-8"),
+            hashlib.sha256,
+        ).digest()
+        signature_b64 = base64.urlsafe_b64encode(signature).decode("utf-8").rstrip("=")
+        return f"{payload_b64}.{signature_b64}"
+
+    def resolve_user_id_from_state(self, state: str | None) -> int | None:
+        if not state or "." not in state:
+            return None
+
+        payload_b64, signature_b64 = state.split(".", 1)
+        expected_signature = hmac.new(
+            SPOTIFY_CLIENT_SECRET.encode("utf-8"),
+            payload_b64.encode("utf-8"),
+            hashlib.sha256,
+        ).digest()
+        expected_signature_b64 = base64.urlsafe_b64encode(expected_signature).decode("utf-8").rstrip("=")
+
+        if not hmac.compare_digest(signature_b64, expected_signature_b64):
+            return None
+
+        try:
+            padding = "=" * (-len(payload_b64) % 4)
+            payload_json = base64.urlsafe_b64decode(payload_b64 + padding)
+            payload = json.loads(payload_json)
+        except (ValueError, json.JSONDecodeError):
+            return None
+
+        if not isinstance(payload, dict):
+            return None
+
+        user_id = payload.get("uid")
+        issued_at = payload.get("ts")
+        if not isinstance(user_id, int) or not isinstance(issued_at, int):
+            return None
+
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        if issued_at > now_ts or now_ts - issued_at > STATE_TTL_SECONDS:
+            return None
+
+        return user_id
 
     async def _enforce_user_rate_limit(self, user_id: int) -> None:
         now = monotonic()
@@ -225,6 +280,8 @@ class SpotifyService:
     def build_auth_url(self, user_id: int) -> str:
         if not SPOTIFY_CLIENT_ID:
             raise HTTPException(status_code=500, detail="SPOTIFY_CLIENT_ID is not configured")
+        if not SPOTIFY_CLIENT_SECRET:
+            raise HTTPException(status_code=500, detail="SPOTIFY_CLIENT_SECRET is not configured")
 
         query = urlencode(
             {
@@ -232,7 +289,7 @@ class SpotifyService:
                 "client_id": SPOTIFY_CLIENT_ID,
                 "scope": SPOTIFY_SCOPES,
                 "redirect_uri": SPOTIFY_REDIRECT_URI,
-                "state": str(user_id),
+                "state": self._build_state(user_id),
             }
         )
         return f"{AUTH_URL}?{query}"
@@ -396,7 +453,11 @@ class SpotifyService:
         )
 
         if status == 200 and payload:
-            return self._map_track(payload.get("item"))
+            mapped = self._map_track(payload.get("item"))
+            if mapped:
+                mapped["source"] = "current"
+                mapped["played_at"] = None
+            return mapped
 
         if status in (204, 404):
             return None
@@ -409,7 +470,11 @@ class SpotifyService:
                 user_id=user_id,
             )
             if status == 200 and payload:
-                return self._map_track(payload.get("item"))
+                mapped = self._map_track(payload.get("item"))
+                if mapped:
+                    mapped["source"] = "current"
+                    mapped["played_at"] = None
+                return mapped
 
         logger.warning("Current track lookup failed for user_id=%s status=%s payload=%s", user_id, status, payload)
         return None
@@ -432,7 +497,11 @@ class SpotifyService:
             if not items:
                 return None
             first_item = items[0] if isinstance(items[0], dict) else {}
-            return self._map_track(first_item.get("track"))
+            mapped = self._map_track(first_item.get("track"))
+            if mapped:
+                mapped["source"] = "last"
+                mapped["played_at"] = first_item.get("played_at")
+            return mapped
 
         logger.warning("Recently played lookup failed for user_id=%s status=%s payload=%s", user_id, status, payload)
         return None

@@ -8,10 +8,14 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = BASE_DIR / "data"
 DATABASE_URL = f"sqlite:///{(DATA_DIR / 'app.db').resolve()}"
 
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
+
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
-SPOTIFY_REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI", "http://localhost:8000/callback")
-SPOTIFY_SCOPES = "user-read-currently-playing user-read-recently-played user-top-read"
+SPOTIFY_REDIRECT_URI = f"{BASE_URL}/callback"
+SPOTIFY_SCOPES = "user-read-currently-playing user-read-recently-played"
 
 SPOTIFY_HTTP_TIMEOUT_SECONDS = float(os.getenv("SPOTIFY_HTTP_TIMEOUT_SECONDS", "10"))
 SPOTIFY_MAX_CONCURRENT_REQUESTS = int(os.getenv("SPOTIFY_MAX_CONCURRENT_REQUESTS", "10"))
@@ -23,5 +27,3 @@ SPOTIFY_CIRCUIT_BREAKER_THRESHOLD = int(os.getenv("SPOTIFY_CIRCUIT_BREAKER_THRES
 SPOTIFY_CIRCUIT_BREAKER_COOLDOWN_SECONDS = float(
     os.getenv("SPOTIFY_CIRCUIT_BREAKER_COOLDOWN_SECONDS", "8")
 )
-
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
