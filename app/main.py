@@ -81,3 +81,6 @@ async def spotify_artist(user_id: int, db: Session = Depends(get_db)) -> dict[st
 @app.get("/spotify/ranking")
 async def spotify_ranking(user_id: int, db: Session = Depends(get_db)) -> dict[str, list[dict[str, str | None]]]:
     return await spotify_service.get_top_tracks(db, user_id)
+from app.handlers.commands import router
+
+dp.include_router(router)
