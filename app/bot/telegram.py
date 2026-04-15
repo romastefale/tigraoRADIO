@@ -4,8 +4,10 @@ import asyncio
 import html
 import logging
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command
 from aiogram.types import ChatType
 from aiogram.types import Message
@@ -21,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 bot_dispatcher: Dispatcher | None = None
 bot_polling_task: asyncio.Task[None] | None = None
+SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 
 
 def _new_session() -> Session:
@@ -55,17 +58,29 @@ def _format_play_status(track: dict[str, str | None], user_label: str) -> str:
     if isinstance(played_at_raw, str):
         try:
             parsed = datetime.fromisoformat(played_at_raw.replace("Z", "+00:00"))
-            formatted_time = parsed.strftime("%Hh%Mmin")
+            formatted_time = parsed.astimezone(SAO_PAULO_TZ).strftime("%Hh%Mmin")
         except ValueError:
             formatted_time = "--h--min"
 
     return f"🎹 {html.escape(user_label)} ouviu às {formatted_time}"
 
 
-def _play_caption(status_line: str, spotify_url: str, track_name: str, album: str, artist: str) -> str:
+def _play_caption(
+    status_line: str,
+    spotify_url: str | None,
+    track_name: str,
+    album: str,
+    artist: str,
+) -> str:
+    escaped_track = html.escape(track_name)
+    if spotify_url:
+        track_text = f"<a href=\"{html.escape(spotify_url)}\"><b>{escaped_track}</b></a>"
+    else:
+        track_text = f"<b>{escaped_track}</b>"
+
     return (
         f"{status_line}\n"
-        f"🎧 <a href=\"{html.escape(spotify_url)}\"><b>{html.escape(track_name)}</b></a> - "
+        f"🎧 {track_text} - "
         f"<i>{html.escape(album)}</i> — <i>{html.escape(artist)}</i>"
     )
 
@@ -103,6 +118,10 @@ def _register_handlers(dp: Dispatcher) -> None:
 
     @dp.message(Command("login"))
     async def login(message: Message) -> None:
+        if message.chat.type != ChatType.PRIVATE:
+            await message.answer("🔒 Use /login no privado para conectar seu Spotify.")
+            return
+
         user_id = message.from_user.id if message.from_user else 0
         link = spotify_service.build_auth_url(user_id)
         await message.answer(f"Authorize Spotify access: {link}")
@@ -121,7 +140,7 @@ def _register_handlers(dp: Dispatcher) -> None:
             status_line = _format_play_status(track, username)
             caption = _play_caption(
                 status_line=status_line,
-                spotify_url=str(track.get("spotify_url") or ""),
+                spotify_url=track.get("spotify_url"),
                 track_name=str(track.get("track_name") or ""),
                 album=str(track.get("album") or ""),
                 artist=str(track.get("artist") or ""),
@@ -182,7 +201,7 @@ async def startup_telegram_bot() -> None:
     if bot_polling_task and not bot_polling_task.done():
         return
 
-    bot = Bot(token=TELEGRAM_BOT_TOKEN)
+    bot = Bot(token=TELEGRAM_BOT_TOKEN, session=AiohttpSession(timeout=10))
     bot_dispatcher = Dispatcher()
     _register_handlers(bot_dispatcher)
 
