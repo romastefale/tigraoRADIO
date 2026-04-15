@@ -12,18 +12,18 @@ from app.config.settings import DATABASE_URL
 logger = logging.getLogger(__name__)
 
 # ========================
-# PREPARAR DIRETÓRIO /data (RAILWAY)
+# PREPARAR /data COM SEGURANÇA
 # ========================
 
 try:
     os.makedirs("/data", exist_ok=True)
-    logger.info("Database directory /data is available.")
+    logger.info("Database directory /data ready.")
 except Exception as exc:  # noqa: BLE001
-    logger.warning("Could not prepare /data, fallback may be used: %s", exc)
+    logger.warning("Could not prepare /data: %s", exc)
 
 
 # ========================
-# ENGINE CONFIG
+# ENGINE SEGURO
 # ========================
 
 connect_args: dict = {}
@@ -46,12 +46,15 @@ Base = declarative_base()
 
 
 # ========================
-# INIT DATABASE
+# INIT
 # ========================
 
 def init_db() -> None:
-    """Create all database tables if they do not exist."""
-    from app.models.spotify_token import SpotifyToken  # noqa: F401
+    """Create tables safely without crashing the app."""
+    try:
+        from app.models.spotify_token import SpotifyToken  # noqa: F401
 
-    logger.info("Initializing database with URL: %s", DATABASE_URL)
-    Base.metadata.create_all(bind=engine)
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database initialized.")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Database initialization failed: %s", exc)
