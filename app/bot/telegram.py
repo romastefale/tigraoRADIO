@@ -9,7 +9,6 @@ from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command
-from aiogram.types import ChatType
 from aiogram.types import Message
 from sqlalchemy.orm import Session
 
@@ -88,7 +87,7 @@ def _play_caption(
 def _register_handlers(dp: Dispatcher) -> None:
     @dp.message(Command("start"))
     async def start(message: Message) -> None:
-        if message.chat.type == ChatType.PRIVATE:
+        if message.chat.type == "private":
             await message.answer(
                 "🎧 Bem-vindo ao Tigrao Radio Bot\n\n"
                 "Use /login para conectar seu Spotify\n"
@@ -118,7 +117,7 @@ def _register_handlers(dp: Dispatcher) -> None:
 
     @dp.message(Command("login"))
     async def login(message: Message) -> None:
-        if message.chat.type != ChatType.PRIVATE:
+        if message.chat.type != "private":
             await message.answer("🔒 Use /login no privado para conectar seu Spotify.")
             return
 
