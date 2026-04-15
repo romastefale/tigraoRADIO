@@ -18,7 +18,7 @@ app = FastAPI(title="Minimal Backend")
 @app.on_event("startup")
 async def on_startup() -> None:
     init_db()
-    await spotify_service.startup()
+    asyncio.create_task(spotify_service.startup())
     asyncio.create_task(startup_telegram_bot())
 
 
