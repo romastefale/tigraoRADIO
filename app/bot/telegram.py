@@ -6,6 +6,7 @@ import logging
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
+from aiogram.types import ChatType
 from aiogram.types import Message
 from sqlalchemy.orm import Session
 
@@ -54,7 +55,37 @@ def _play_caption(username: str, spotify_url: str, track_name: str, album: str, 
 def _register_handlers(dp: Dispatcher) -> None:
     @dp.message(Command("start"))
     async def start(message: Message) -> None:
-        await message.answer("Welcome to Tigrao Radio Bot! Commands: /login /play")
+        if message.chat.type == ChatType.PRIVATE:
+            await message.answer(
+                "🎧 Bem-vindo ao Tigrao Radio Bot\n\n"
+                "Conecte seu Spotify com /login\n"
+                "e comece a compartilhar suas músicas."
+            )
+            return
+
+        await message.answer(
+            "🎧 Tigrao Radio ativo.\n\n"
+            "Use /login no privado para conectar seu Spotify.\n"
+            'Depois use "tocando" ou /play.'
+        )
+
+    @dp.message(Command("help"))
+    async def help_command(message: Message) -> None:
+        await message.answer(
+            "🎧 Tigrao Radio Bot\n\n"
+            "Compartilhe o que você está ouvindo no Spotify.\n\n"
+            "Comandos:\n"
+            "/login - conectar Spotify\n"
+            "/logout - desconectar Spotify\n"
+            "/play - mostrar música atual\n"
+            "/ranking - suas mais ouvidas\n\n"
+            "Você também pode usar mensagens:\n\n"
+            '"tocando"\n'
+            '"ouvindo"\n'
+            '"qual música"\n'
+            '"top"\n\n'
+            "O bot entende e responde automaticamente."
+        )
 
     @dp.message(Command("login"))
     async def login(message: Message) -> None:
@@ -84,6 +115,21 @@ def _register_handlers(dp: Dispatcher) -> None:
                 photo=str(track.get("album_image_url") or ""),
                 caption=caption,
                 parse_mode="HTML",
+            )
+        except Exception as exc:  # noqa: BLE001
+            await _handle_spotify_error(message, exc)
+        finally:
+            db.close()
+
+    @dp.message(Command("logout"))
+    async def logout(message: Message) -> None:
+        user_id = message.from_user.id if message.from_user else 0
+        db = _new_session()
+        try:
+            await spotify_service.clear_user_session(db, user_id)
+            await message.answer(
+                "🔌 Desconectado do Spotify.\n"
+                "Use /login para conectar novamente."
             )
         except Exception as exc:  # noqa: BLE001
             await _handle_spotify_error(message, exc)
