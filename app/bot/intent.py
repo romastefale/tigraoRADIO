@@ -1,38 +1,19 @@
 def detect_intent(text: str) -> str | None:
-    if not text:
-        return None
-
     text = text.lower().strip()
 
-    # PLAY
-    if any(p in text for p in [
-        "tocando", "ouvindo", "agora", "musica", "som",
-        "manda som", "qual musica", "qual som"
-    ]):
+    if any(p in text for p in ["tocando", "ouvindo", "agora", "musica", "som"]):
         return "play"
 
-    # ALBUM
-    if any(p in text for p in [
-        "album", "disco", "qual album"
-    ]):
+    if any(p in text for p in ["album", "disco"]):
         return "album"
 
-    # ARTIST
-    if any(p in text for p in [
-        "artista", "banda", "quem canta", "quem é"
-    ]):
+    if any(p in text for p in ["artista", "banda"]):
         return "artist"
 
-    # RANKING
-    if any(p in text for p in [
-        "top", "favoritas", "mais ouvidas", "ranking", "hits"
-    ]):
+    if any(p in text for p in ["top", "favoritas", "ranking"]):
         return "ranking"
 
-    # GROUP
-    if any(p in text for p in [
-        "grupo", "geral", "galera", "todo mundo"
-    ]):
+    if any(p in text for p in ["grupo", "galera"]):
         return "geeknow"
 
     return None
