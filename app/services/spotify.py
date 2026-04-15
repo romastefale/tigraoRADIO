@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -36,6 +37,8 @@ RETRYABLE_STATUSES = {429, 500, 502, 503}
 MAX_RETRIES = 4
 BACKOFF_BASE_SECONDS = 0.5
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class CacheEntry:
@@ -54,7 +57,13 @@ class SpotifyService:
 
     async def startup(self) -> None:
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=httpx.Timeout(SPOTIFY_HTTP_TIMEOUT_SECONDS))
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(SPOTIFY_HTTP_TIMEOUT_SECONDS),
+                limits=httpx.Limits(
+                    max_connections=SPOTIFY_MAX_CONCURRENT_REQUESTS,
+                    max_keepalive_connections=max(5, SPOTIFY_MAX_CONCURRENT_REQUESTS // 2),
+                ),
+            )
 
     async def shutdown(self) -> None:
         if self._client is not None:
@@ -93,9 +102,18 @@ class SpotifyService:
         assert self._client is not None
 
         for attempt in range(MAX_RETRIES + 1):
-            await self._enforce_user_rate_limit(user_id)
-            async with self._semaphore:
-                response = await self._client.request(method=method, url=url, headers=headers, data=data)
+            if attempt == 0:
+                await self._enforce_user_rate_limit(user_id)
+
+            try:
+                async with self._semaphore:
+                    response = await self._client.request(method=method, url=url, headers=headers, data=data)
+            except httpx.HTTPError as exc:
+                logger.exception("Spotify request transport error for user_id=%s url=%s", user_id, url, exc_info=exc)
+                if attempt == MAX_RETRIES:
+                    return 503, None
+                await asyncio.sleep(BACKOFF_BASE_SECONDS * (2**attempt))
+                continue
 
             payload: dict[str, Any] | None
             try:
@@ -316,7 +334,7 @@ class SpotifyService:
         raise HTTPException(status_code=400, detail=f"Spotify recently played lookup failed: {payload}")
 
     async def get_current_or_last_played(self, db: Session, user_id: int) -> dict[str, Any]:
-        cache_key = "current_or_last"
+        cache_key = "play"
         cached = await self._get_cached(user_id, cache_key)
         if cached:
             return cached
@@ -336,6 +354,11 @@ class SpotifyService:
         raise HTTPException(status_code=404, detail="No current or recently played track found")
 
     async def get_album_info(self, db: Session, user_id: int) -> dict[str, Any]:
+        cache_key = "album"
+        cached = await self._get_cached(user_id, cache_key)
+        if cached:
+            return cached
+
         track = await self.get_current_or_last_played(db, user_id)
         payload = {
             "album": track.get("album"),
@@ -344,9 +367,15 @@ class SpotifyService:
             "album_cover_url": track.get("album_cover_url"),
             "source": track.get("source"),
         }
+        await self._set_cache(user_id, cache_key, payload)
         return payload
 
     async def get_artist_info(self, db: Session, user_id: int) -> dict[str, Any]:
+        cache_key = "artist"
+        cached = await self._get_cached(user_id, cache_key)
+        if cached:
+            return cached
+
         track = await self.get_current_or_last_played(db, user_id)
         payload = {
             "artist": track.get("artist"),
@@ -354,10 +383,11 @@ class SpotifyService:
             "album": track.get("album"),
             "source": track.get("source"),
         }
+        await self._set_cache(user_id, cache_key, payload)
         return payload
 
     async def get_top_tracks(self, db: Session, user_id: int) -> dict[str, Any]:
-        cache_key = "top_tracks"
+        cache_key = "ranking"
         cached = await self._get_cached(user_id, cache_key)
         if cached:
             return cached
