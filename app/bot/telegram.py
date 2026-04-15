@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+from datetime import datetime
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
@@ -39,14 +40,31 @@ def _telegram_identity(message: Message) -> str:
         return "unknown"
 
     if user.username:
-        return user.username
+        return f"@{user.username}"
 
     return user.full_name
 
 
-def _play_caption(username: str, spotify_url: str, track_name: str, album: str, artist: str) -> str:
+def _format_play_status(track: dict[str, str | None], user_label: str) -> str:
+    source = str(track.get("source") or "")
+    if source == "current":
+        return f"🎹 {html.escape(user_label)} está ouvindo"
+
+    played_at_raw = track.get("played_at")
+    formatted_time = "--h--min"
+    if isinstance(played_at_raw, str):
+        try:
+            parsed = datetime.fromisoformat(played_at_raw.replace("Z", "+00:00"))
+            formatted_time = parsed.strftime("%Hh%Mmin")
+        except ValueError:
+            formatted_time = "--h--min"
+
+    return f"🎹 {html.escape(user_label)} ouviu às {formatted_time}"
+
+
+def _play_caption(status_line: str, spotify_url: str, track_name: str, album: str, artist: str) -> str:
     return (
-        f"🎹 @{html.escape(username)} está ouvindo\n"
+        f"{status_line}\n"
         f"🎧 <a href=\"{html.escape(spotify_url)}\"><b>{html.escape(track_name)}</b></a> - "
         f"<i>{html.escape(album)}</i> — <i>{html.escape(artist)}</i>"
     )
@@ -58,15 +76,14 @@ def _register_handlers(dp: Dispatcher) -> None:
         if message.chat.type == ChatType.PRIVATE:
             await message.answer(
                 "🎧 Bem-vindo ao Tigrao Radio Bot\n\n"
-                "Conecte seu Spotify com /login\n"
-                "e comece a compartilhar suas músicas."
+                "Use /login para conectar seu Spotify\n"
+                'e depois use /play ou "tocando"'
             )
             return
 
         await message.answer(
             "🎧 Tigrao Radio ativo.\n\n"
-            "Use /login no privado para conectar seu Spotify.\n"
-            'Depois use "tocando" ou /play.'
+            'Use /login no privado e depois use /play ou "tocando"'
         )
 
     @dp.message(Command("help"))
@@ -77,14 +94,11 @@ def _register_handlers(dp: Dispatcher) -> None:
             "Comandos:\n"
             "/login - conectar Spotify\n"
             "/logout - desconectar Spotify\n"
-            "/play - mostrar música atual\n"
-            "/ranking - suas mais ouvidas\n\n"
-            "Você também pode usar mensagens:\n\n"
+            "/play - mostrar música atual\n\n"
+            "Você também pode usar mensagens:\n"
             '"tocando"\n'
             '"ouvindo"\n'
-            '"qual música"\n'
-            '"top"\n\n'
-            "O bot entende e responde automaticamente."
+            '"qual música"'
         )
 
     @dp.message(Command("login"))
@@ -104,18 +118,25 @@ def _register_handlers(dp: Dispatcher) -> None:
                 return
 
             username = _telegram_identity(message)
+            status_line = _format_play_status(track, username)
             caption = _play_caption(
-                username=username,
+                status_line=status_line,
                 spotify_url=str(track.get("spotify_url") or ""),
                 track_name=str(track.get("track_name") or ""),
                 album=str(track.get("album") or ""),
                 artist=str(track.get("artist") or ""),
             )
-            await message.reply_photo(
-                photo=str(track.get("album_image_url") or ""),
-                caption=caption,
-                parse_mode="HTML",
-            )
+
+            album_image_url = track.get("album_image_url")
+            if album_image_url:
+                await message.reply_photo(
+                    photo=str(album_image_url),
+                    caption=caption,
+                    parse_mode="HTML",
+                )
+                return
+
+            await message.answer(caption, parse_mode="HTML")
         except Exception as exc:  # noqa: BLE001
             await _handle_spotify_error(message, exc)
         finally:
