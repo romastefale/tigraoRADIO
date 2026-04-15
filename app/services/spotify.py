@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import logging
+import base64
 from typing import Any
+
+import httpx
 
 from app.config.settings import (
     BASE_URL,
     SPOTIFY_CLIENT_ID,
+    SPOTIFY_CLIENT_SECRET,
     SPOTIFY_SCOPES,
 )
 
@@ -14,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 class SpotifyService:
     def __init__(self) -> None:
-        # inicialização leve, sem rede e sem validação agressiva
         pass
 
     async def startup(self) -> None:
@@ -42,7 +45,28 @@ class SpotifyService:
             return None
 
     async def exchange_code_for_token(self, db, code: str, user_id: int) -> None:
-        logger.info("Token exchange skipped in safe mode for user_id=%s", user_id)
+        redirect_uri = f"{BASE_URL.rstrip('/')}/callback"
+
+        auth_str = f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}"
+        b64_auth = base64.b64encode(auth_str.encode()).decode()
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://accounts.spotify.com/api/token",
+                data={
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "redirect_uri": redirect_uri,
+                },
+                headers={
+                    "Authorization": f"Basic {b64_auth}",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+            )
+
+        data = response.json()
+
+        logger.info("SPOTIFY TOKEN RESPONSE: %s", data)
 
     async def get_current_or_last_played(
         self, db, user_id: int
