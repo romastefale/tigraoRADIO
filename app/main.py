@@ -1,16 +1,8 @@
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI, Request
-from fastapi.responses import RedirectResponse
-from sqlalchemy.orm import Session
+from fastapi import FastAPI
 
-from app.db.database import get_db, init_db
-from app.services.spotify import (
-    exchange_code_for_tokens,
-    get_current_track,
-    get_last_played_track,
-    build_auth_url,
-)
+from app.db.database import init_db
 
 
 app = FastAPI(title="Minimal Backend")
@@ -24,26 +16,3 @@ def on_startup() -> None:
 @app.get("/healthz", status_code=200)
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
-
-
-@app.get("/spotify/login")
-def spotify_login(request: Request) -> RedirectResponse:
-    callback_uri = str(request.url_for("spotify_callback"))
-    return RedirectResponse(url=build_auth_url(callback_uri), status_code=302)
-
-
-@app.get("/callback")
-def spotify_callback(code: str, request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
-    callback_uri = str(request.url_for("spotify_callback"))
-    exchange_code_for_tokens(db, code, callback_uri)
-    return {"status": "connected"}
-
-
-@app.get("/spotify/current-track")
-def spotify_current_track(db: Session = Depends(get_db)) -> dict:
-    return get_current_track(db)
-
-
-@app.get("/spotify/last-played")
-def spotify_last_played(db: Session = Depends(get_db)) -> dict:
-    return get_last_played_track(db)

@@ -1,8 +1,6 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "deploy": {
-    "startCommand": "python app/bootstrap.py",
-    "healthcheckPath": "/healthz",
-    "healthcheckTimeout": 120
+    "startCommand": "python app/bootstrap.py"
   }
 }
