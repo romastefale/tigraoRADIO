@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from time import monotonic
@@ -15,7 +15,10 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.config.settings import (
+    SPOTIFY_CACHE_MAX_ENTRIES,
     SPOTIFY_CACHE_TTL_SECONDS,
+    SPOTIFY_CIRCUIT_BREAKER_COOLDOWN_SECONDS,
+    SPOTIFY_CIRCUIT_BREAKER_THRESHOLD,
     SPOTIFY_CLIENT_ID,
     SPOTIFY_CLIENT_SECRET,
     SPOTIFY_HTTP_TIMEOUT_SECONDS,
@@ -36,6 +39,7 @@ TOP_TRACKS_URL = "https://api.spotify.com/v1/me/top/tracks?limit=5"
 RETRYABLE_STATUSES = {429, 500, 502, 503}
 MAX_RETRIES = 4
 BACKOFF_BASE_SECONDS = 0.5
+GLOBAL_HTTP_TIMEOUT_SECONDS = min(SPOTIFY_HTTP_TIMEOUT_SECONDS, 10.0)
 
 logger = logging.getLogger(__name__)
 
@@ -50,15 +54,18 @@ class SpotifyService:
     def __init__(self) -> None:
         self._client: httpx.AsyncClient | None = None
         self._semaphore = asyncio.Semaphore(SPOTIFY_MAX_CONCURRENT_REQUESTS)
-        self._cache: dict[tuple[int, str], CacheEntry] = {}
+        self._cache: OrderedDict[tuple[int, str], CacheEntry] = OrderedDict()
         self._cache_lock = asyncio.Lock()
         self._rate_limit: dict[int, deque[float]] = defaultdict(deque)
         self._rate_limit_lock = asyncio.Lock()
+        self._breaker_lock = asyncio.Lock()
+        self._failure_count = 0
+        self._breaker_open_until = 0.0
 
     async def startup(self) -> None:
         if self._client is None:
             self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(SPOTIFY_HTTP_TIMEOUT_SECONDS),
+                timeout=httpx.Timeout(GLOBAL_HTTP_TIMEOUT_SECONDS),
                 limits=httpx.Limits(
                     max_connections=SPOTIFY_MAX_CONCURRENT_REQUESTS,
                     max_keepalive_connections=max(5, SPOTIFY_MAX_CONCURRENT_REQUESTS // 2),
@@ -101,15 +108,26 @@ class SpotifyService:
         await self.startup()
         assert self._client is not None
 
+        if await self._is_circuit_open():
+            logger.warning("Circuit breaker open, skipping Spotify request for user_id=%s url=%s", user_id, url)
+            return 503, None
+
         for attempt in range(MAX_RETRIES + 1):
             if attempt == 0:
                 await self._enforce_user_rate_limit(user_id)
 
             try:
                 async with self._semaphore:
-                    response = await self._client.request(method=method, url=url, headers=headers, data=data)
+                    response = await self._client.request(
+                        method=method,
+                        url=url,
+                        headers=headers,
+                        data=data,
+                        timeout=httpx.Timeout(GLOBAL_HTTP_TIMEOUT_SECONDS),
+                    )
             except httpx.HTTPError as exc:
                 logger.exception("Spotify request transport error for user_id=%s url=%s", user_id, url, exc_info=exc)
+                await self._record_failure()
                 if attempt == MAX_RETRIES:
                     return 503, None
                 await asyncio.sleep(BACKOFF_BASE_SECONDS * (2**attempt))
@@ -122,9 +140,14 @@ class SpotifyService:
                 payload = None
 
             if response.status_code not in RETRYABLE_STATUSES:
+                if response.status_code < 400:
+                    await self._record_success()
+                elif response.status_code >= 500:
+                    await self._record_failure()
                 return response.status_code, payload
 
             if attempt == MAX_RETRIES:
+                await self._record_failure()
                 return response.status_code, payload
 
             retry_after_header = response.headers.get("Retry-After")
@@ -136,24 +159,58 @@ class SpotifyService:
 
         return 500, None
 
+    async def _is_circuit_open(self) -> bool:
+        async with self._breaker_lock:
+            return monotonic() < self._breaker_open_until
+
+    async def _record_failure(self) -> None:
+        async with self._breaker_lock:
+            self._failure_count += 1
+            if self._failure_count >= SPOTIFY_CIRCUIT_BREAKER_THRESHOLD:
+                self._breaker_open_until = monotonic() + SPOTIFY_CIRCUIT_BREAKER_COOLDOWN_SECONDS
+                self._failure_count = 0
+
+    async def _record_success(self) -> None:
+        async with self._breaker_lock:
+            self._failure_count = 0
+            self._breaker_open_until = 0.0
+
+    async def _prune_expired_cache_locked(self) -> None:
+        now = monotonic()
+        expired_keys = [cache_key for cache_key, entry in self._cache.items() if entry.expires_at < now]
+        for cache_key in expired_keys:
+            self._cache.pop(cache_key, None)
+
     async def _get_cached(self, user_id: int, key: str) -> dict[str, Any] | None:
         cache_key = (user_id, key)
         async with self._cache_lock:
+            await self._prune_expired_cache_locked()
             cached = self._cache.get(cache_key)
             if cached is None:
                 return None
-            if cached.expires_at < monotonic():
-                self._cache.pop(cache_key, None)
-                return None
+            self._cache.move_to_end(cache_key)
             return cached.payload
 
     async def _set_cache(self, user_id: int, key: str, payload: dict[str, Any]) -> None:
         cache_key = (user_id, key)
         async with self._cache_lock:
+            await self._prune_expired_cache_locked()
             self._cache[cache_key] = CacheEntry(
                 expires_at=monotonic() + SPOTIFY_CACHE_TTL_SECONDS,
                 payload=payload,
             )
+            self._cache.move_to_end(cache_key)
+            while len(self._cache) > SPOTIFY_CACHE_MAX_ENTRIES:
+                self._cache.popitem(last=False)
+
+    def _safe_fallback_track(self, source: str) -> dict[str, Any]:
+        return {
+            "source": source,
+            "track_name": "Unavailable",
+            "artist": "Unavailable",
+            "album": "Unavailable",
+            "album_cover_url": None,
+        }
 
     def build_auth_url(self, user_id: int) -> str:
         if not SPOTIFY_CLIENT_ID:
@@ -219,6 +276,8 @@ class SpotifyService:
 
         if status != 200 or payload is None:
             raise HTTPException(status_code=400, detail=f"Spotify token exchange failed: {payload}")
+        if not payload.get("access_token"):
+            raise HTTPException(status_code=400, detail="Spotify token exchange returned invalid access token")
 
         refresh_token = payload.get("refresh_token")
         if not refresh_token:
@@ -232,9 +291,9 @@ class SpotifyService:
         return self._save_token(
             db=db,
             user_id=user_id,
-            access_token=payload["access_token"],
+            access_token=payload.get("access_token", ""),
             refresh_token=refresh_token,
-            expires_in=payload["expires_in"],
+            expires_in=int(payload.get("expires_in", 3600)),
         )
 
     async def refresh_token_if_needed(self, db: Session, user_id: int) -> SpotifyToken:
@@ -264,23 +323,32 @@ class SpotifyService:
 
         if status != 200 or payload is None:
             raise HTTPException(status_code=400, detail=f"Spotify token refresh failed: {payload}")
+        if not payload.get("access_token"):
+            raise HTTPException(status_code=400, detail="Spotify token refresh returned invalid access token")
 
         new_refresh_token = payload.get("refresh_token", token_row.refresh_token)
         return self._save_token(
             db=db,
             user_id=user_id,
-            access_token=payload["access_token"],
+            access_token=payload.get("access_token", token_row.access_token),
             refresh_token=new_refresh_token,
-            expires_in=payload["expires_in"],
+            expires_in=int(payload.get("expires_in", 3600)),
         )
 
     def _map_track(self, item: dict[str, Any] | None) -> dict[str, Any] | None:
-        if not item:
+        if not item or not isinstance(item, dict):
             return None
 
         album = item.get("album", {})
-        artists = [artist.get("name") for artist in item.get("artists", []) if artist.get("name")]
+        if not isinstance(album, dict):
+            album = {}
+        artists_source = item.get("artists", [])
+        if not isinstance(artists_source, list):
+            artists_source = []
+        artists = [artist.get("name") for artist in artists_source if isinstance(artist, dict) and artist.get("name")]
         images = album.get("images", [])
+        if not isinstance(images, list):
+            images = []
 
         return {
             "track_name": item.get("name"),
@@ -290,7 +358,11 @@ class SpotifyService:
         }
 
     async def get_current_track(self, db: Session, user_id: int) -> dict[str, Any] | None:
-        token_row = await self.refresh_token_if_needed(db, user_id)
+        try:
+            token_row = await self.refresh_token_if_needed(db, user_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to refresh token for current track user_id=%s", user_id, exc_info=exc)
+            return None
 
         status, payload = await self._request_with_retry(
             NOW_PLAYING_URL,
@@ -314,10 +386,15 @@ class SpotifyService:
             if status == 200 and payload:
                 return self._map_track(payload.get("item"))
 
-        raise HTTPException(status_code=400, detail=f"Spotify current track lookup failed: {payload}")
+        logger.warning("Current track lookup failed for user_id=%s status=%s payload=%s", user_id, status, payload)
+        return None
 
     async def get_last_played_track(self, db: Session, user_id: int) -> dict[str, Any] | None:
-        token_row = await self.refresh_token_if_needed(db, user_id)
+        try:
+            token_row = await self.refresh_token_if_needed(db, user_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to refresh token for recent track user_id=%s", user_id, exc_info=exc)
+            return None
 
         status, payload = await self._request_with_retry(
             RECENTLY_PLAYED_URL,
@@ -326,12 +403,14 @@ class SpotifyService:
         )
 
         if status == 200 and payload:
-            items = payload.get("items", [])
+            items = payload.get("items", []) if isinstance(payload, dict) else []
             if not items:
                 return None
-            return self._map_track(items[0].get("track"))
+            first_item = items[0] if isinstance(items[0], dict) else {}
+            return self._map_track(first_item.get("track"))
 
-        raise HTTPException(status_code=400, detail=f"Spotify recently played lookup failed: {payload}")
+        logger.warning("Recently played lookup failed for user_id=%s status=%s payload=%s", user_id, status, payload)
+        return None
 
     async def get_current_or_last_played(self, db: Session, user_id: int) -> dict[str, Any]:
         cache_key = "play"
@@ -339,19 +418,22 @@ class SpotifyService:
         if cached:
             return cached
 
-        current = await self.get_current_track(db, user_id)
-        if current:
-            result = {"source": "currently_playing", **current}
-            await self._set_cache(user_id, cache_key, result)
-            return result
+        try:
+            current = await self.get_current_track(db, user_id)
+            if current:
+                result = {"source": "currently_playing", **current}
+                await self._set_cache(user_id, cache_key, result)
+                return result
 
-        last_played = await self.get_last_played_track(db, user_id)
-        if last_played:
-            result = {"source": "recently_played", **last_played}
-            await self._set_cache(user_id, cache_key, result)
-            return result
+            last_played = await self.get_last_played_track(db, user_id)
+            if last_played:
+                result = {"source": "recently_played", **last_played}
+                await self._set_cache(user_id, cache_key, result)
+                return result
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Track lookup failed for user_id=%s", user_id, exc_info=exc)
 
-        raise HTTPException(status_code=404, detail="No current or recently played track found")
+        return self._safe_fallback_track("fallback")
 
     async def get_album_info(self, db: Session, user_id: int) -> dict[str, Any]:
         cache_key = "album"
@@ -392,7 +474,11 @@ class SpotifyService:
         if cached:
             return cached
 
-        token_row = await self.refresh_token_if_needed(db, user_id)
+        try:
+            token_row = await self.refresh_token_if_needed(db, user_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to refresh token for top tracks user_id=%s", user_id, exc_info=exc)
+            return {"tracks": []}
         status, payload = await self._request_with_retry(
             TOP_TRACKS_URL,
             headers={"Authorization": f"Bearer {token_row.access_token}"},
@@ -400,16 +486,32 @@ class SpotifyService:
         )
 
         if status != 200 or payload is None:
-            raise HTTPException(status_code=400, detail=f"Spotify top tracks lookup failed: {payload}")
+            logger.warning("Top tracks lookup failed for user_id=%s status=%s payload=%s", user_id, status, payload)
+            return {"tracks": []}
 
         tracks: list[dict[str, Any]] = []
-        for item in payload.get("items", []):
-            artists = [artist.get("name") for artist in item.get("artists", []) if artist.get("name")]
+        payload_items = payload.get("items", []) if isinstance(payload, dict) else []
+        if not isinstance(payload_items, list):
+            payload_items = []
+        for item in payload_items:
+            if not isinstance(item, dict):
+                continue
+            artists_source = item.get("artists", [])
+            if not isinstance(artists_source, list):
+                artists_source = []
+            artists = [
+                artist.get("name")
+                for artist in artists_source
+                if isinstance(artist, dict) and artist.get("name")
+            ]
+            album = item.get("album", {})
+            if not isinstance(album, dict):
+                album = {}
             tracks.append(
                 {
                     "track_name": item.get("name"),
                     "artist": ", ".join(artists),
-                    "album": item.get("album", {}).get("name"),
+                    "album": album.get("name"),
                 }
             )
 
