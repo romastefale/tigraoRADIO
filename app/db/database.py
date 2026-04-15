@@ -18,4 +18,7 @@ Base = declarative_base()
 
 def init_db() -> None:
     """Create all database tables if they do not exist."""
+    # Import models here so SQLAlchemy is aware of metadata before create_all.
+    from app.models.spotify_token import SpotifyToken  # noqa: F401
+
     Base.metadata.create_all(bind=engine)
