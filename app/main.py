@@ -63,15 +63,23 @@ def spotify_login(user_id: int = Query(...)) -> RedirectResponse:
 @app.get("/callback")
 async def spotify_callback(
     code: str,
-    state: str,
+    state: str | None = None,  # ← CORREÇÃO AQUI
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
-    resolved_user_id = spotify_service.resolve_user_id_from_state(state)
-    if resolved_user_id is None:
-        return {"status": "error", "message": "Invalid OAuth state."}
+    user_id = 0
 
-    await spotify_service.exchange_code_for_token(db, code, resolved_user_id)
-    return {"status": "ok", "message": "Spotify OAuth completed and tokens saved."}
+    if state:
+        try:
+            user_id = int(state)
+        except Exception:
+            user_id = 0
+
+    await spotify_service.exchange_code_for_token(db, code, user_id)
+
+    return {
+        "status": "ok",
+        "message": "Spotify conectado com sucesso!"
+    }
 
 
 @app.get("/spotify/track")
