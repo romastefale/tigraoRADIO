@@ -63,22 +63,23 @@ def spotify_login(user_id: int = Query(...)) -> RedirectResponse:
 @app.get("/callback")
 async def spotify_callback(
     code: str,
-    state: str | None = None,  # ← CORREÇÃO AQUI
+    state: str,  # ← AGORA OBRIGATÓRIO
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
-    user_id = 0
 
-    if state:
-        try:
-            user_id = int(state)
-        except Exception:
-            user_id = 0
+    user_id = spotify_service.resolve_user_id_from_state(state)
+
+    if user_id is None:
+        return {
+            "status": "error",
+            "message": "Invalid state. Use /login novamente.",
+        }
 
     await spotify_service.exchange_code_for_token(db, code, user_id)
 
     return {
         "status": "ok",
-        "message": "Spotify conectado com sucesso!"
+        "message": "Spotify conectado com sucesso!",
     }
 
 
