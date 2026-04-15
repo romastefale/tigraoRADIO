@@ -3,7 +3,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# base do projeto
+# ========================
+# BASE
+# ========================
+
 BASE_DIR = Path(__file__).resolve().parents[2]
 
 # ========================
@@ -25,7 +28,7 @@ SPOTIFY_REDIRECT_URI = f"{BASE_URL.rstrip('/')}/callback"
 SPOTIFY_SCOPES = "user-read-currently-playing user-read-recently-played"
 
 # ========================
-# SPOTIFY PERFORMANCE / RESILIENCE
+# PERFORMANCE
 # ========================
 
 SPOTIFY_HTTP_TIMEOUT_SECONDS = float(os.getenv("SPOTIFY_HTTP_TIMEOUT_SECONDS", "10"))
@@ -47,9 +50,9 @@ SPOTIFY_CIRCUIT_BREAKER_COOLDOWN_SECONDS = float(
 # ========================
 
 # prioridade:
-# 1. DATABASE_URL (se existir)
-# 2. Railway volume (/data)
-# 3. fallback local (./app.db)
+# 1. DATABASE_URL (env)
+# 2. /data (Railway volume)
+# 3. fallback local
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
