@@ -22,8 +22,8 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
 
-BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
-SPOTIFY_REDIRECT_URI = f"{BASE_URL.rstrip('/')}/callback"
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
+SPOTIFY_REDIRECT_URI = f"{BASE_URL}/callback"
 
 SPOTIFY_SCOPES = "user-read-currently-playing user-read-recently-played"
 
@@ -46,18 +46,13 @@ SPOTIFY_CIRCUIT_BREAKER_COOLDOWN_SECONDS = float(
 )
 
 # ========================
-# DATABASE (AUTO SAFE)
+# DATABASE (FIXED SQLITE + VOLUME)
 # ========================
 
-# prioridade:
-# 1. DATABASE_URL (env)
-# 2. /data (Railway volume)
-# 3. fallback local
+DATA_DIR = Path("/data")
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
 if not DATABASE_URL:
-    if Path("/data").exists():
-        DATABASE_URL = "sqlite:////data/app.db"
-    else:
-        DATABASE_URL = f"sqlite:///{(BASE_DIR / 'app.db').resolve()}"
+    DATABASE_URL = f"sqlite:///{DATA_DIR / 'app.db'}"
