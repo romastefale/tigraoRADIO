@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.config.settings import BASE_URL
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,7 +20,8 @@ class SpotifyService:
         logger.info("Spotify service stopped.")
 
     def build_auth_url(self, user_id: int) -> str:
-        return f"/spotify/login?user_id={user_id}"
+        base = BASE_URL.rstrip("/")
+        return f"{base}/spotify/login?user_id={user_id}"
 
     def resolve_user_id_from_state(self, state: str) -> int | None:
         try:
