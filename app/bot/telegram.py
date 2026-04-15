@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 
 from aiogram import Bot, Dispatcher, F
@@ -20,15 +21,6 @@ bot_dispatcher: Dispatcher | None = None
 bot_polling_task: asyncio.Task[None] | None = None
 
 
-def _format_track(track: dict[str, str | None]) -> str:
-    return (
-        f"Source: {track.get('source')}\n"
-        f"Track: {track.get('track_name')}\n"
-        f"Artist: {track.get('artist')}\n"
-        f"Album: {track.get('album')}"
-    )
-
-
 def _new_session() -> Session:
     return SessionLocal()
 
@@ -40,12 +32,29 @@ async def _handle_spotify_error(message: Message, exc: Exception) -> None:
     )
 
 
+def _telegram_identity(message: Message) -> str:
+    user = message.from_user
+    if not user:
+        return "unknown"
+
+    if user.username:
+        return user.username
+
+    return user.full_name
+
+
+def _play_caption(username: str, spotify_url: str, track_name: str, album: str, artist: str) -> str:
+    return (
+        f"🎹 @{html.escape(username)} está ouvindo\n"
+        f"🎧 <a href=\"{html.escape(spotify_url)}\"><b>{html.escape(track_name)}</b></a> - "
+        f"<i>{html.escape(album)}</i> — <i>{html.escape(artist)}</i>"
+    )
+
+
 def _register_handlers(dp: Dispatcher) -> None:
     @dp.message(Command("start"))
     async def start(message: Message) -> None:
-        await message.answer(
-            "Welcome to Tigrao Radio Bot! Commands: /login /play /album /artist /ranking"
-        )
+        await message.answer("Welcome to Tigrao Radio Bot! Commands: /login /play")
 
     @dp.message(Command("login"))
     async def login(message: Message) -> None:
@@ -59,64 +68,23 @@ def _register_handlers(dp: Dispatcher) -> None:
         db = _new_session()
         try:
             track = await spotify_service.get_current_or_last_played(db, user_id)
-            await message.answer(_format_track(track))
-        except Exception as exc:  # noqa: BLE001
-            await _handle_spotify_error(message, exc)
-        finally:
-            db.close()
-
-    @dp.message(Command("album"))
-    async def album(message: Message) -> None:
-        user_id = message.from_user.id if message.from_user else 0
-        db = _new_session()
-        try:
-            info = await spotify_service.get_album_info(db, user_id)
-            await message.answer(
-                f"Album: {info.get('album')}\n"
-                f"Artist: {info.get('artist')}\n"
-                f"Track: {info.get('track_name')}\n"
-                f"Source: {info.get('source')}"
-            )
-        except Exception as exc:  # noqa: BLE001
-            await _handle_spotify_error(message, exc)
-        finally:
-            db.close()
-
-    @dp.message(Command("artist"))
-    async def artist(message: Message) -> None:
-        user_id = message.from_user.id if message.from_user else 0
-        db = _new_session()
-        try:
-            info = await spotify_service.get_artist_info(db, user_id)
-            await message.answer(
-                f"Artist: {info.get('artist')}\n"
-                f"Track: {info.get('track_name')}\n"
-                f"Album: {info.get('album')}\n"
-                f"Source: {info.get('source')}"
-            )
-        except Exception as exc:  # noqa: BLE001
-            await _handle_spotify_error(message, exc)
-        finally:
-            db.close()
-
-    @dp.message(Command("ranking"))
-    async def ranking(message: Message) -> None:
-        user_id = message.from_user.id if message.from_user else 0
-        db = _new_session()
-        try:
-            ranking_info = await spotify_service.get_top_tracks(db, user_id)
-            tracks = ranking_info.get("tracks", [])
-            if not tracks:
-                await message.answer("No top tracks available for this user yet.")
+            if not track:
+                await message.answer("Nada está tocando agora.")
                 return
 
-            lines = ["Top tracks:"]
-            for idx, track in enumerate(tracks, start=1):
-                lines.append(
-                    f"{idx}. {track.get('track_name')} — "
-                    f"{track.get('artist')} ({track.get('album')})"
-                )
-            await message.answer("\n".join(lines))
+            username = _telegram_identity(message)
+            caption = _play_caption(
+                username=username,
+                spotify_url=str(track.get("spotify_url") or ""),
+                track_name=str(track.get("track_name") or ""),
+                album=str(track.get("album") or ""),
+                artist=str(track.get("artist") or ""),
+            )
+            await message.reply_photo(
+                photo=str(track.get("album_image_url") or ""),
+                caption=caption,
+                parse_mode="HTML",
+            )
         except Exception as exc:  # noqa: BLE001
             await _handle_spotify_error(message, exc)
         finally:
@@ -133,17 +101,8 @@ def _register_handlers(dp: Dispatcher) -> None:
             return
 
         intent = detect_intent(message.text)
-        if not intent:
-            return
-
         if intent == "play":
             await play(message)
-        elif intent == "album":
-            await album(message)
-        elif intent == "artist":
-            await artist(message)
-        elif intent == "ranking":
-            await ranking(message)
 
 
 async def startup_telegram_bot() -> None:
