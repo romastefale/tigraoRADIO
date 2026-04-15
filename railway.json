@@ -1,6 +1,7 @@
 {
-  "$schema": "https://railway.com/railway.schema.json",
+  "$schema": "https://railway.app/railway.schema.json",
   "deploy": {
-    "startCommand": "python app/bootstrap.py"
+    "startCommand": "python app/bootstrap.py",
+    "healthcheckPath": "/healthz"
   }
 }
