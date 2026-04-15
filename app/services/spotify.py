@@ -3,7 +3,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.config.settings import BASE_URL
+from app.config.settings import (
+    BASE_URL,
+    SPOTIFY_CLIENT_ID,
+    SPOTIFY_SCOPES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +24,16 @@ class SpotifyService:
         logger.info("Spotify service stopped.")
 
     def build_auth_url(self, user_id: int) -> str:
-        base = BASE_URL.rstrip("/")
-        return f"{base}/spotify/login?user_id={user_id}"
+        redirect_uri = f"{BASE_URL.rstrip('/')}/callback"
+
+        return (
+            "https://accounts.spotify.com/authorize"
+            f"?client_id={SPOTIFY_CLIENT_ID}"
+            "&response_type=code"
+            f"&redirect_uri={redirect_uri}"
+            f"&scope={SPOTIFY_SCOPES}"
+            f"&state={user_id}"
+        )
 
     def resolve_user_id_from_state(self, state: str) -> int | None:
         try:
