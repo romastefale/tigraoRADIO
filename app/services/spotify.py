@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import base64
 from typing import Any
-from urllib.parse import quote  # ← ADICIONADO
+from urllib.parse import quote
 
 import httpx
 
@@ -35,7 +35,7 @@ class SpotifyService:
             f"?client_id={SPOTIFY_CLIENT_ID}"
             "&response_type=code"
             f"&redirect_uri={redirect_uri}"
-            f"&scope={quote(SPOTIFY_SCOPES)}"  # ← CORREÇÃO
+            f"&scope={quote(SPOTIFY_SCOPES)}"
             f"&state={user_id}"
         )
 
@@ -72,12 +72,14 @@ class SpotifyService:
     async def get_current_or_last_played(
         self, db, user_id: int
     ) -> dict[str, Any] | None:
+
+        # 🔥 comportamento correto por enquanto
         return {
             "source": "last",
             "played_at": None,
-            "track_name": "Spotify ainda não configurado",
-            "artist": "Sistema",
-            "album": "Inicialização",
+            "track_name": "Faça /login para conectar seu Spotify",
+            "artist": "Spotify",
+            "album": "",
             "spotify_url": None,
             "album_image_url": None,
         }
