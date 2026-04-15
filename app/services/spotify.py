@@ -19,6 +19,9 @@ from app.models.spotify_token import SpotifyToken
 
 logger = logging.getLogger(__name__)
 
+# 🔥 IMPORTANTE: tem que ser EXATAMENTE igual ao Spotify Dashboard
+REDIRECT_URI = "https://tigraoradio-production.up.railway.app/callback"
+
 
 class SpotifyService:
     def __init__(self) -> None:
@@ -31,13 +34,11 @@ class SpotifyService:
         logger.info("Spotify service stopped.")
 
     def build_auth_url(self, user_id: int) -> str:
-        redirect_uri = f"{BASE_URL.rstrip('/')}/callback"
-
         return (
             "https://accounts.spotify.com/authorize"
             f"?client_id={SPOTIFY_CLIENT_ID}"
             "&response_type=code"
-            f"&redirect_uri={redirect_uri}"
+            f"&redirect_uri={REDIRECT_URI}"
             f"&scope={quote(SPOTIFY_SCOPES)}"
             f"&state={user_id}"
         )
@@ -49,8 +50,6 @@ class SpotifyService:
             return None
 
     async def exchange_code_for_token(self, db, code: str, user_id: int) -> None:
-        redirect_uri = f"{BASE_URL.rstrip('/')}/callback"
-
         auth_str = f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}"
         b64_auth = base64.b64encode(auth_str.encode()).decode()
 
@@ -60,7 +59,7 @@ class SpotifyService:
                 data={
                     "grant_type": "authorization_code",
                     "code": code,
-                    "redirect_uri": redirect_uri,
+                    "redirect_uri": REDIRECT_URI,
                 },
                 headers={
                     "Authorization": f"Basic {b64_auth}",
@@ -70,12 +69,15 @@ class SpotifyService:
 
         data = response.json()
 
+        logger.error("SPOTIFY STATUS: %s", response.status_code)
+        logger.error("SPOTIFY RESPONSE: %s", data)
+
         access_token = data.get("access_token")
         refresh_token = data.get("refresh_token")
         expires_in = data.get("expires_in")
 
         if not access_token or not refresh_token or not expires_in:
-            logger.error("Invalid token response: %s", data)
+            logger.error("Invalid token response")
             return
 
         expiration = datetime.utcnow() + timedelta(seconds=expires_in)
@@ -156,7 +158,6 @@ class SpotifyService:
             db.delete(token)
             db.commit()
 
-        logger.info("User %s disconnected from Spotify", user_id)
         return True
 
 
