@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Generator
 
 from fastapi import Depends, FastAPI, Query
@@ -18,7 +19,7 @@ app = FastAPI(title="Minimal Backend")
 async def on_startup() -> None:
     init_db()
     await spotify_service.startup()
-    await startup_telegram_bot()
+    asyncio.create_task(startup_telegram_bot())
 
 
 @app.on_event("shutdown")
