@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Generator
 
 from fastapi import Depends, FastAPI, Query
@@ -13,13 +14,26 @@ from app.services.spotify import spotify_service
 
 
 app = FastAPI(title="Minimal Backend")
+logger = logging.getLogger(__name__)
+
+
+def _log_background_task_result(task: asyncio.Task[None], task_name: str) -> None:
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        return
+    except Exception:  # noqa: BLE001
+        logger.exception("Background task '%s' failed", task_name)
 
 
 @app.on_event("startup")
 async def on_startup() -> None:
     init_db()
-    asyncio.create_task(spotify_service.startup())
-    asyncio.create_task(startup_telegram_bot())
+    spotify_startup_task = asyncio.create_task(spotify_service.startup())
+    spotify_startup_task.add_done_callback(lambda task: _log_background_task_result(task, "spotify_startup"))
+
+    telegram_startup_task = asyncio.create_task(startup_telegram_bot())
+    telegram_startup_task.add_done_callback(lambda task: _log_background_task_result(task, "telegram_startup"))
 
 
 @app.on_event("shutdown")
