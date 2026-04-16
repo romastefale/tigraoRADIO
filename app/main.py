@@ -22,7 +22,7 @@ def _log_background_task_result(task: asyncio.Task[None], task_name: str) -> Non
         task.result()
     except asyncio.CancelledError:
         return
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("Background task '%s' failed", task_name)
 
 
@@ -63,19 +63,33 @@ def spotify_login(user_id: int = Query(...)) -> RedirectResponse:
 @app.get("/callback")
 async def spotify_callback(
     code: str,
-    state: str,  # ← AGORA OBRIGATÓRIO
+    state: str,
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
 
+    logger.error("CALLBACK RECEIVED")
+    logger.error("CODE RECEIVED")
+    logger.error("STATE RECEIVED: %s", state)
+
     user_id = spotify_service.resolve_user_id_from_state(state)
+    logger.error("RESOLVED USER_ID: %s", user_id)
 
     if user_id is None:
+        logger.error("INVALID STATE")
         return {
             "status": "error",
             "message": "Invalid state. Use /login novamente.",
         }
 
-    await spotify_service.exchange_code_for_token(db, code, user_id)
+    try:
+        await spotify_service.exchange_code_for_token(db, code, user_id)
+        logger.error("TOKEN FLOW COMPLETED")
+    except Exception as e:
+        logger.error("TOKEN FLOW FAILED: %s", e)
+        return {
+            "status": "error",
+            "message": "Erro ao conectar com Spotify",
+        }
 
     return {
         "status": "ok",
@@ -85,6 +99,7 @@ async def spotify_callback(
 
 @app.get("/spotify/track")
 async def spotify_track(
-    user_id: int, db: Session = Depends(get_db)
+    user_id: int,
+    db: Session = Depends(get_db),
 ) -> dict[str, str | None] | None:
     return await spotify_service.get_current_or_last_played(db, user_id)
