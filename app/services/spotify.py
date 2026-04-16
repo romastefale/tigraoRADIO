@@ -70,7 +70,7 @@ class SpotifyService:
         refresh_token = data.get("refresh_token")
         expires_in = data.get("expires_in")
 
-        if not access_token or not refresh_token or not expires_in:
+        if not access_token or not expires_in:
             logger.error("Invalid token response: %s", data)
             return
 
@@ -80,14 +80,17 @@ class SpotifyService:
 
         if existing:
             existing.access_token = access_token
-            existing.refresh_token = refresh_token
             existing.expiration = expiration
+
+            # 🔥 NÃO perder refresh_token antigo
+            if refresh_token:
+                existing.refresh_token = refresh_token
         else:
             db.add(
                 SpotifyToken(
                     user_id=user_id,
                     access_token=access_token,
-                    refresh_token=refresh_token,
+                    refresh_token=refresh_token or "",
                     expiration=expiration,
                 )
             )
@@ -95,6 +98,10 @@ class SpotifyService:
         db.commit()
 
     async def _refresh_token(self, db, token: SpotifyToken) -> SpotifyToken | None:
+        if not token.refresh_token:
+            logger.error("Missing refresh token for user_id=%s", token.user_id)
+            return None
+
         auth_str = f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}"
         b64_auth = base64.b64encode(auth_str.encode()).decode()
 
@@ -144,48 +151,53 @@ class SpotifyService:
                 "album_image_url": None,
             }
 
-        if token.expiration <= datetime.utcnow():
+        async def fetch_current(access_token: str):
+            async with httpx.AsyncClient() as client:
+                return await client.get(
+                    "https://api.spotify.com/v1/me/player/currently-playing",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+
+        async def fetch_recent(access_token: str):
+            async with httpx.AsyncClient() as client:
+                return await client.get(
+                    "https://api.spotify.com/v1/me/player/recently-played?limit=1",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+
+        # 🔥 tentativa com token atual
+        response = await fetch_current(token.access_token)
+
+        # 🔥 se token inválido → refresh e tenta de novo
+        if response.status_code == 401:
             refreshed = await self._refresh_token(db, token)
-            if not refreshed:
+            if refreshed:
+                response = await fetch_current(refreshed.access_token)
+                token = refreshed
+
+        if response.status_code == 200:
+            data = response.json()
+            item = data.get("item")
+
+            if item:
                 return {
-                    "source": "last",
+                    "source": "current",
                     "played_at": None,
-                    "track_name": "Sessão expirada, use /login novamente",
-                    "artist": "Spotify",
-                    "album": "",
-                    "spotify_url": None,
-                    "album_image_url": None,
+                    "track_name": item["name"],
+                    "artist": item["artists"][0]["name"],
+                    "album": item["album"]["name"],
+                    "spotify_url": item["external_urls"]["spotify"],
+                    "album_image_url": item["album"]["images"][0]["url"],
                 }
-            token = refreshed
 
-        async with httpx.AsyncClient() as client:
+        # 🔥 fallback
+        recent = await fetch_recent(token.access_token)
 
-            # 1) tenta música atual
-            response = await client.get(
-                "https://api.spotify.com/v1/me/player/currently-playing",
-                headers={"Authorization": f"Bearer {token.access_token}"},
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                item = data.get("item")
-
-                if item:
-                    return {
-                        "source": "current",
-                        "played_at": None,
-                        "track_name": item["name"],
-                        "artist": item["artists"][0]["name"],
-                        "album": item["album"]["name"],
-                        "spotify_url": item["external_urls"]["spotify"],
-                        "album_image_url": item["album"]["images"][0]["url"],
-                    }
-
-            # 2) fallback: última música tocada
-            recent = await client.get(
-                "https://api.spotify.com/v1/me/player/recently-played?limit=1",
-                headers={"Authorization": f"Bearer {token.access_token}"},
-            )
+        # 🔥 novamente tratar 401
+        if recent.status_code == 401:
+            refreshed = await self._refresh_token(db, token)
+            if refreshed:
+                recent = await fetch_recent(refreshed.access_token)
 
         if recent.status_code != 200:
             logger.error("Spotify fallback error: %s", recent.text)
