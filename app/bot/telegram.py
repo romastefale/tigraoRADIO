@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, InlineQuery, InlineQueryResultPhoto
 from sqlalchemy.orm import Session
 
 from app.bot.intent import detect_intent
@@ -85,6 +86,54 @@ def _play_caption(
 
 
 def _register_handlers(dp: Dispatcher) -> None:
+
+    # ========================
+    # INLINE MODE
+    # ========================
+    @dp.inline_query()
+    async def inline_play(query: InlineQuery) -> None:
+        text = (query.query or "").strip().lower()
+
+        if text != "p":
+            return
+
+        user_id = query.from_user.id
+        db = _new_session()
+
+        try:
+            track = await spotify_service.get_current_or_last_played(db, user_id)
+            if not track:
+                return
+
+            status_line = _format_play_status(track, query.from_user.full_name)
+            caption = _play_caption(
+                status_line=status_line,
+                spotify_url=track.get("spotify_url"),
+                track_name=str(track.get("track_name") or ""),
+                artist=str(track.get("artist") or ""),
+            )
+
+            album_image_url = track.get("album_image_url")
+            if not album_image_url:
+                return
+
+            result = InlineQueryResultPhoto(
+                id=str(uuid.uuid4()),
+                photo_url=album_image_url,
+                thumbnail_url=album_image_url,
+                caption=caption,
+                parse_mode="HTML",
+            )
+
+            await query.answer([result], cache_time=1)
+
+        finally:
+            db.close()
+
+    # ========================
+    # COMMANDS
+    # ========================
+
     @dp.message(Command("start"))
     async def start(message: Message) -> None:
         if message.chat.type == "private":
@@ -154,6 +203,7 @@ def _register_handlers(dp: Dispatcher) -> None:
                 return
 
             await message.answer(caption, parse_mode="HTML")
+
         except Exception as exc:  # noqa: BLE001
             await _handle_spotify_error(message, exc)
         finally:
@@ -169,7 +219,7 @@ def _register_handlers(dp: Dispatcher) -> None:
                 "🔌 Desconectado do Spotify.\n"
                 "Use /login para conectar novamente."
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             await _handle_spotify_error(message, exc)
         finally:
             db.close()
@@ -181,7 +231,6 @@ def _register_handlers(dp: Dispatcher) -> None:
 
         text = message.text.strip().lower()
 
-        # bloqueio isolado
         if text in BLOCKED_WORDS:
             await message.answer("Mensagem não permitida.")
             return
