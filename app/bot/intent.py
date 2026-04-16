@@ -1,23 +1,10 @@
 def detect_intent(text: str) -> str | None:
-    normalized = text.lower().strip()
+    if not text:
+        return None
 
-    play_phrases = [
-        "tocando",
-        "ouvindo",
-        "agora",
-        "música",
-        "musica",
-        "som",
-        "play",
-        "qual musica",
-        "qual música",
-        "qual som",
-        "manda som",
-        "o que ta tocando",
-        "oq ta tocando",
-    ]
+    text = text.strip().lower()
 
-    if any(phrase in normalized for phrase in play_phrases):
+    if text in ["tocando", "ouvindo", "qual música", "qual musica"]:
         return "play"
 
     return None
