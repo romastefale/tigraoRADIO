@@ -85,6 +85,23 @@ def _play_caption(
     )
 
 
+def _track_lookup_caption(track: dict[str, str | None], user_label: str) -> str:
+    track_name = str(track.get("track_name") or "")
+    artist = str(track.get("artist") or "")
+    spotify_url = track.get("spotify_url")
+    escaped_track = html.escape(track_name)
+
+    if spotify_url:
+        track_text = f"<a href=\"{html.escape(spotify_url)}\"><b>{escaped_track}</b></a>"
+    else:
+        track_text = f"<b>{escaped_track}</b>"
+
+    return (
+        f"🎶 {html.escape(user_label)} está ouvindo\n"
+        f"🎧 {track_text} - <i>{html.escape(artist)}</i>"
+    )
+
+
 def _register_handlers(dp: Dispatcher) -> None:
 
     # ========================
@@ -242,8 +259,35 @@ def _register_handlers(dp: Dispatcher) -> None:
             return
 
         intent = detect_intent(message.text)
-        if intent == "play":
+        if not intent:
+            return
+
+        if intent.kind == "play":
             await play(message)
+            return
+
+        if intent.kind != "track_lookup" or not intent.query:
+            return
+
+        try:
+            track = await spotify_service.search_track_high_confidence(intent.query)
+            if not track:
+                return
+
+            username = _telegram_identity(message)
+            caption = _track_lookup_caption(track, username)
+            album_image_url = track.get("album_image_url")
+            if album_image_url:
+                await message.answer_photo(
+                    photo=str(album_image_url),
+                    caption=caption,
+                    parse_mode="HTML",
+                )
+                return
+
+            await message.answer(caption, parse_mode="HTML")
+        except Exception as exc:
+            logger.exception("Natural music lookup failed", exc_info=exc)
 
 
 async def startup_telegram_bot() -> None:
