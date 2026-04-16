@@ -4,7 +4,9 @@ import asyncio
 import html
 import logging
 import uuid
+from collections import deque
 from datetime import datetime
+from time import monotonic
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F
@@ -17,6 +19,7 @@ from app.bot.intent import detect_intent
 from app.config.settings import TELEGRAM_BOT_TOKEN
 from app.core.runtime import allow
 from app.db.database import SessionLocal
+from app.services.streaming import streaming_service
 from app.services.spotify import spotify_service
 
 logger = logging.getLogger(__name__)
@@ -25,6 +28,14 @@ bot_dispatcher: Dispatcher | None = None
 bot_polling_task: asyncio.Task[None] | None = None
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 BLOCKED_WORDS = ["palavra1", "palavra2"]
+STREAMING_RATE_WINDOW_SECONDS = 10.0
+STREAMING_RATE_LIMIT = 5
+STREAMING_CACHE_TTL_SECONDS = 180.0
+STREAMING_DEDUP_TTL_SECONDS = 120.0
+
+_streaming_rate_limit: dict[int, deque[float]] = {}
+_streaming_result_cache: dict[str, tuple[float, dict[str, str | None]]] = {}
+_streaming_seen_messages: dict[tuple[int, int], float] = {}
 
 # ========================
 def _new_session() -> Session:
@@ -83,6 +94,166 @@ def _play_caption(
         f"🎧 {track_text} - "
         f"<i>{html.escape(artist)}</i>"
     )
+
+
+def _streaming_prune_state() -> None:
+    now = monotonic()
+
+    expired_seen = [
+        key
+        for key, seen_at in _streaming_seen_messages.items()
+        if now - seen_at > STREAMING_DEDUP_TTL_SECONDS
+    ]
+    for key in expired_seen:
+        _streaming_seen_messages.pop(key, None)
+
+    expired_cache = [
+        key
+        for key, (cached_at, _) in _streaming_result_cache.items()
+        if now - cached_at > STREAMING_CACHE_TTL_SECONDS
+    ]
+    for key in expired_cache:
+        _streaming_result_cache.pop(key, None)
+
+    for chat_id, timestamps in list(_streaming_rate_limit.items()):
+        while timestamps and now - timestamps[0] > STREAMING_RATE_WINDOW_SECONDS:
+            timestamps.popleft()
+        if not timestamps:
+            _streaming_rate_limit.pop(chat_id, None)
+
+
+def _streaming_should_rate_limit(chat_id: int) -> bool:
+    now = monotonic()
+    history = _streaming_rate_limit.setdefault(chat_id, deque())
+    while history and now - history[0] > STREAMING_RATE_WINDOW_SECONDS:
+        history.popleft()
+
+    if len(history) >= STREAMING_RATE_LIMIT:
+        return True
+
+    history.append(now)
+    return False
+
+
+def _streaming_identity(message: Message) -> str:
+    if not message.from_user:
+        return "usuário"
+    if message.from_user.username:
+        return f"@{message.from_user.username}"
+    name = message.from_user.full_name.strip()
+    return name or "usuário"
+
+
+def _streaming_response_text(
+    user_label: str,
+    service: str,
+    track_name: str,
+    artist: str,
+) -> str:
+    return (
+        f"🎹 {html.escape(user_label)} está ouvindo no {html.escape(service)}\n"
+        f"🎧 {html.escape(track_name)} - {html.escape(artist)}"
+    )
+
+
+async def _process_streaming_message(
+    message: Message,
+    *,
+    link_text: str | None,
+    private_missing_link_message: bool,
+) -> None:
+    if not message.chat or not message.chat.id:
+        return
+
+    if not message.message_id:
+        return
+
+    chat_id = int(message.chat.id)
+    chat_type = str(message.chat.type or "")
+
+    _streaming_prune_state()
+
+    dedup_key = (chat_id, int(message.message_id))
+    if dedup_key in _streaming_seen_messages:
+        return
+    _streaming_seen_messages[dedup_key] = monotonic()
+
+    if _streaming_should_rate_limit(chat_id):
+        return
+
+    if not link_text:
+        if private_missing_link_message and chat_type == "private":
+            await message.bot.send_message(
+                chat_id=chat_id,
+                text="Envie um link válido de Apple Music, Spotify, Deezer ou YouTube Music.",
+            )
+        return
+
+    if "http" not in link_text.lower():
+        return
+
+    url = streaming_service.extract_url(link_text)
+    if not url:
+        return
+
+    service = streaming_service.detect_service(url)
+    if not service:
+        return
+
+    track_id = streaming_service.extract_track_id(service, url)
+    if not track_id:
+        return
+
+    cache_key = f"{service}:{track_id}"
+    now = monotonic()
+    cached = _streaming_result_cache.get(cache_key)
+    if cached and now - cached[0] <= STREAMING_CACHE_TTL_SECONDS:
+        track_data = cached[1]
+    else:
+        try:
+            resolved = await asyncio.wait_for(
+                streaming_service.resolve_track(service, track_id), timeout=4.5
+            )
+        except Exception:
+            return
+
+        if not resolved:
+            return
+
+        track_name = str(resolved.get("track_name") or "").strip()
+        artist = str(resolved.get("artist") or "").strip()
+        if not track_name or not artist:
+            return
+
+        track_data = {
+            "service": str(resolved.get("service") or service),
+            "track_name": track_name,
+            "artist": artist,
+            "artwork_url": str(resolved.get("artwork_url") or "") or None,
+        }
+        _streaming_result_cache[cache_key] = (now, track_data)
+
+    text = _streaming_response_text(
+        user_label=_streaming_identity(message),
+        service=str(track_data.get("service") or service),
+        track_name=str(track_data.get("track_name") or ""),
+        artist=str(track_data.get("artist") or ""),
+    )
+
+    artwork_url = track_data.get("artwork_url")
+    if artwork_url:
+        try:
+            await message.bot.send_photo(
+                chat_id=chat_id,
+                photo=str(artwork_url),
+                caption=text,
+                parse_mode="HTML",
+            )
+            return
+        except Exception:
+            pass
+
+    await message.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
 
 
 def _register_handlers(dp: Dispatcher) -> None:
@@ -224,6 +395,29 @@ def _register_handlers(dp: Dispatcher) -> None:
             await _handle_spotify_error(message, exc)
         finally:
             db.close()
+
+    @dp.message(Command("streaming"))
+    async def streaming_command(message: Message) -> None:
+        command_text = message.text or ""
+        pieces = command_text.split(maxsplit=1)
+        link_text = pieces[1] if len(pieces) > 1 else None
+        await _process_streaming_message(
+            message,
+            link_text=link_text,
+            private_missing_link_message=True,
+        )
+
+    @dp.message(F.text)
+    async def streaming_link_listener(message: Message) -> None:
+        text = message.text or ""
+        if "http" not in text.lower():
+            return
+
+        await _process_streaming_message(
+            message,
+            link_text=text,
+            private_missing_link_message=False,
+        )
 
     @dp.message(F.text)
     async def natural_handler(message: Message) -> None:
