@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 bot_dispatcher: Dispatcher | None = None
 bot_polling_task: asyncio.Task[None] | None = None
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
+BLOCKED_WORDS = ["palavra1", "palavra2"]
 
 
 def _new_session() -> Session:
@@ -68,7 +69,6 @@ def _play_caption(
     status_line: str,
     spotify_url: str | None,
     track_name: str,
-    album: str,
     artist: str,
 ) -> str:
     escaped_track = html.escape(track_name)
@@ -80,7 +80,7 @@ def _play_caption(
     return (
         f"{status_line}\n"
         f"🎧 {track_text} - "
-        f"<i>{html.escape(album)}</i> — <i>{html.escape(artist)}</i>"
+        f"<i>{html.escape(artist)}</i>"
     )
 
 
@@ -141,7 +141,6 @@ def _register_handlers(dp: Dispatcher) -> None:
                 status_line=status_line,
                 spotify_url=track.get("spotify_url"),
                 track_name=str(track.get("track_name") or ""),
-                album=str(track.get("album") or ""),
                 artist=str(track.get("artist") or ""),
             )
 
@@ -179,6 +178,12 @@ def _register_handlers(dp: Dispatcher) -> None:
     async def natural_handler(message: Message) -> None:
         if not message.text or not message.from_user:
             return
+
+        if message.text:
+            text = message.text.strip().lower()
+            if text in BLOCKED_WORDS:
+                await message.answer("Mensagem não permitida.")
+                return
 
         user_id = message.from_user.id
 
