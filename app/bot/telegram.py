@@ -224,16 +224,21 @@ async def _process_streaming_message(
                 resolved = await asyncio.wait_for(
                     streaming_service.resolve_indirect_track(service, url), timeout=4.5
                 )
+        except asyncio.TimeoutError:
+            return None
         except Exception:
-            return
+            return None
 
         if not resolved:
-            return
+            return None
+
+        if resolved.get("error"):
+            return None
 
         track_name = str(resolved.get("track_name") or "").strip()
         artist = str(resolved.get("artist") or "").strip()
         if not track_name or not artist:
-            return
+            return None
 
         track_data = {
             "service": str(resolved.get("service") or service),
@@ -241,7 +246,8 @@ async def _process_streaming_message(
             "artist": artist,
             "artwork_url": str(resolved.get("artwork_url") or "") or None,
         }
-        _streaming_result_cache[cache_key] = (now, track_data)
+        if track_data is not None:
+            _streaming_result_cache[cache_key] = (now, track_data)
 
     text = _streaming_response_text(
         user_label=_streaming_identity(message),
