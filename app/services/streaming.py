@@ -123,6 +123,49 @@ class StreamingService:
 
     async def _resolve_indirect_track_inner(self, service: str, url: str) -> StreamingTrack | None:
         metadata = await self._extract_indirect_metadata(service, url)
+        resolved = await self._resolve_from_metadata(metadata, service=service)
+        if resolved:
+            return resolved
+        return await self._resolve_via_odesli(url, service=service)
+
+    async def _resolve_via_odesli(self, url: str, *, service: str) -> StreamingTrack | None:
+        endpoint = "https://api.song.link/v1-alpha.1/links"
+        try:
+            async with httpx.AsyncClient(timeout=2.0, follow_redirects=True) as client:
+                response = await client.get(endpoint, params={"url": url})
+        except Exception:
+            return None
+
+        if response.status_code != 200:
+            return None
+
+        try:
+            payload = response.json()
+        except Exception:
+            return None
+
+        spotify_url = self._extract_odesli_spotify_url(payload)
+        if spotify_url:
+            spotify_track_id = self.extract_track_id("Spotify", spotify_url)
+            if spotify_track_id:
+                spotify_track = await self._spotify_track(spotify_track_id)
+                if spotify_track:
+                    return {
+                        "service": service,
+                        "track_name": spotify_track["track_name"],
+                        "artist": spotify_track["artist"],
+                        "artwork_url": spotify_track["artwork_url"],
+                    }
+
+        metadata = self._extract_odesli_metadata(payload, service=service)
+        return await self._resolve_from_metadata(metadata, service=service)
+
+    async def _resolve_from_metadata(
+        self,
+        metadata: StreamingTrack | None,
+        *,
+        service: str,
+    ) -> StreamingTrack | None:
         if not metadata:
             return None
 
@@ -351,6 +394,28 @@ class StreamingService:
                 if value:
                     return value
         return None
+
+    @staticmethod
+    def _extract_odesli_spotify_url(payload: dict) -> str | None:
+        links_by_platform = payload.get("linksByPlatform") or {}
+        spotify_data = links_by_platform.get("spotify") or {}
+        spotify_url = spotify_data.get("url")
+        if isinstance(spotify_url, str) and spotify_url.strip():
+            return spotify_url.strip()
+        return None
+
+    @staticmethod
+    def _extract_odesli_metadata(payload: dict, *, service: str) -> StreamingTrack | None:
+        title = str(payload.get("title") or "").strip()
+        artist = str(payload.get("artistName") or "").strip()
+        if not title or not artist:
+            return None
+        return {
+            "service": service,
+            "track_name": title,
+            "artist": artist,
+            "artwork_url": None,
+        }
 
     async def _spotify_search_track(self, track_name: str, artist_name: str) -> StreamingTrack | None:
         token = await self._spotify_access_token()
