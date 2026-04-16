@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import html
 import re
 import unicodedata
 from difflib import SequenceMatcher
 from typing import TypedDict
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
@@ -35,8 +36,39 @@ class StreamingService:
     def extract_url(text: str) -> str | None:
         for chunk in text.split():
             if chunk.startswith("http://") or chunk.startswith("https://"):
-                return chunk.strip("<>()[]{}.,!\"'")
+                cleaned = chunk.strip("<>()[]{}.,!\"'")
+                return StreamingService._normalize_url_for_cache(cleaned)
         return None
+
+    @staticmethod
+    def _normalize_url_for_cache(url: str) -> str:
+        parsed = urlparse(url)
+        host = (parsed.netloc or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+
+        normalized_query: str = ""
+        if "music.youtube.com" in host:
+            query_values = parse_qs(parsed.query, keep_blank_values=False)
+            allowed_keys = ("v", "list", "title", "artist")
+            filtered_pairs: list[tuple[str, str]] = []
+            for key in allowed_keys:
+                for value in query_values.get(key, []):
+                    value = value.strip()
+                    if value:
+                        filtered_pairs.append((key, value))
+            normalized_query = urlencode(filtered_pairs)
+        elif "music.apple.com" in host:
+            query_values = parse_qs(parsed.query, keep_blank_values=False)
+            filtered_pairs = [
+                (key, value.strip())
+                for key, values in sorted(query_values.items())
+                for value in values
+                if value and value.strip() and key == "i"
+            ]
+            normalized_query = urlencode(filtered_pairs)
+
+        return parsed._replace(netloc=host, fragment="", query=normalized_query).geturl()
 
     def detect_service(self, url: str) -> str | None:
         host = (urlparse(url).netloc or "").lower()
@@ -81,12 +113,21 @@ class StreamingService:
         return None
 
     async def resolve_indirect_track(self, service: str, url: str) -> StreamingTrack | None:
+        try:
+            return await asyncio.wait_for(
+                self._resolve_indirect_track_inner(service, url),
+                timeout=2.5,
+            )
+        except TimeoutError:
+            return None
+
+    async def _resolve_indirect_track_inner(self, service: str, url: str) -> StreamingTrack | None:
         metadata = await self._extract_indirect_metadata(service, url)
         if not metadata:
             return None
 
-        track_name = metadata.get("track_name")
-        artist_name = metadata.get("artist")
+        track_name = str(metadata.get("track_name") or "").strip()
+        artist_name = str(metadata.get("artist") or "").strip()
         if not track_name or not artist_name:
             return None
 
@@ -383,7 +424,7 @@ class StreamingService:
 
         track_score = SequenceMatcher(None, norm_expected_track, norm_candidate_track).ratio()
         artist_score = SequenceMatcher(None, norm_expected_artist, norm_candidate_artist).ratio()
-        return track_score >= 0.78 and artist_score >= 0.72
+        return track_score >= 0.75 and artist_score >= 0.85
 
     @staticmethod
     def _normalize_text(value: str) -> str:
