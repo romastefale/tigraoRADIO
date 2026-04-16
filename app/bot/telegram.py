@@ -4,13 +4,13 @@ import asyncio
 import html
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command
-from aiogram.types import Message, InlineQuery, InlineQueryResultPhoto
+from aiogram.types import Message, InlineQuery, InlineQueryResultPhoto, InputMediaPhoto
 from sqlalchemy.orm import Session
 
 from app.bot.intent import detect_intent
@@ -25,6 +25,19 @@ bot_dispatcher: Dispatcher | None = None
 bot_polling_task: asyncio.Task[None] | None = None
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 BLOCKED_WORDS = ["palavra1", "palavra2"]
+
+# ========================
+# STATION CONFIG
+# ========================
+STATION_OWNER_ID = 8505890439
+
+station_active = False
+station_task: asyncio.Task | None = None
+station_message_id: int | None = None
+station_chat_id: int | None = None
+station_started_at: datetime | None = None
+last_track_id: str | None = None
+last_image_url: str | None = None
 
 
 def _new_session() -> Session:
@@ -134,6 +147,12 @@ def _register_handlers(dp: Dispatcher) -> None:
     # COMMANDS
     # ========================
 
+    @dp.message(Command("station"))
+    async def station(message: Message) -> None:
+        if message.from_user.id != STATION_OWNER_ID:
+            return
+        await toggle_station(message)
+
     @dp.message(Command("start"))
     async def start(message: Message) -> None:
         if message.chat.type == "private":
@@ -204,7 +223,7 @@ def _register_handlers(dp: Dispatcher) -> None:
 
             await message.answer(caption, parse_mode="HTML")
 
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             await _handle_spotify_error(message, exc)
         finally:
             db.close()
@@ -243,6 +262,119 @@ def _register_handlers(dp: Dispatcher) -> None:
         intent = detect_intent(message.text)
         if intent == "play":
             await play(message)
+
+
+# ========================
+# STATION LOGIC
+# ========================
+async def toggle_station(message: Message) -> None:
+    global station_active
+    if not station_active:
+        await start_station(message)
+    else:
+        await stop_station()
+
+
+async def start_station(message: Message) -> None:
+    global station_active, station_task
+    global station_message_id, station_chat_id, station_started_at
+    global last_track_id, last_image_url
+
+    sent = await message.answer("🎧 Iniciando station...")
+
+    station_active = True
+    station_message_id = sent.message_id
+    station_chat_id = sent.chat.id
+    station_started_at = datetime.now()
+
+    last_track_id = None
+    last_image_url = None
+
+    station_task = asyncio.create_task(station_loop())
+
+
+async def stop_station() -> None:
+    global station_active, station_task
+
+    station_active = False
+
+    if station_task:
+        station_task.cancel()
+        station_task = None
+
+    try:
+        bot = bot_dispatcher._bot
+        await bot.edit_message_text(
+            "🎧 Station encerrada",
+            chat_id=station_chat_id,
+            message_id=station_message_id
+        )
+    except:
+        pass
+
+
+async def station_loop() -> None:
+    global last_track_id, last_image_url
+
+    bot = bot_dispatcher._bot
+
+    try:
+        while True:
+            if datetime.now() - station_started_at > timedelta(hours=2):
+                await stop_station()
+                return
+
+            db = _new_session()
+            try:
+                track = await spotify_service.get_current_or_last_played(
+                    db,
+                    STATION_OWNER_ID
+                )
+            finally:
+                db.close()
+
+            if track:
+                track_id = track.get("track_name")
+                image_url = track.get("album_image_url")
+
+                if track_id != last_track_id or image_url != last_image_url:
+                    last_track_id = track_id
+                    last_image_url = image_url
+
+                    status_line = _format_play_status(track, "Você")
+
+                    caption = _play_caption(
+                        status_line=status_line,
+                        spotify_url=track.get("spotify_url"),
+                        track_name=str(track.get("track_name") or ""),
+                        artist=str(track.get("artist") or ""),
+                    )
+
+                    try:
+                        if image_url:
+                            await bot.edit_message_media(
+                                media=InputMediaPhoto(
+                                    media=image_url,
+                                    caption=caption,
+                                    parse_mode="HTML",
+                                ),
+                                chat_id=station_chat_id,
+                                message_id=station_message_id,
+                            )
+                        else:
+                            await bot.edit_message_text(
+                                caption,
+                                chat_id=station_chat_id,
+                                message_id=station_message_id,
+                                parse_mode="HTML",
+                            )
+                    except:
+                        pass
+
+            await asyncio.sleep(5)
+
+    except asyncio.CancelledError:
+        return
 
 
 async def startup_telegram_bot() -> None:
