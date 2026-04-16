@@ -146,7 +146,7 @@ def _register_handlers(dp: Dispatcher) -> None:
 
             album_image_url = track.get("album_image_url")
             if album_image_url:
-                await message.reply_photo(
+                await message.answer_photo(
                     photo=str(album_image_url),
                     caption=caption,
                     parse_mode="HTML",
@@ -179,11 +179,12 @@ def _register_handlers(dp: Dispatcher) -> None:
         if not message.text or not message.from_user:
             return
 
-        if message.text:
-            text = message.text.strip().lower()
-            if text in BLOCKED_WORDS:
-                await message.answer("Mensagem não permitida.")
-                return
+        text = message.text.strip().lower()
+
+        # bloqueio isolado
+        if text in BLOCKED_WORDS:
+            await message.answer("Mensagem não permitida.")
+            return
 
         user_id = message.from_user.id
 
