@@ -6,6 +6,19 @@ from dataclasses import dataclass
 
 PLAY_TRIGGERS = {"tocando", "tigraofm", "radinho", "qap"}
 MUSIC_INTENT_MARKERS = ("ouvindo", "escutando", "curtindo", "tocando", "agora e")
+TRACK_LOOKUP_CONTEXT_BLOCKLIST = (
+    "voce",
+    "você",
+    "falando",
+    "dizendo",
+    "pensando",
+    "trabalhando",
+    "gente",
+    "pessoal",
+)
+TRACK_LOOKUP_QUERY_BLOCKLIST = {"musica", "música", "som", "essa", "aquela"}
+TRACK_LOOKUP_CONNECTORS = {"de", "da", "do", "dos", "das"}
+TRACK_LOOKUP_MAX_WORDS = 6
 
 
 @dataclass(frozen=True)
@@ -43,6 +56,17 @@ def detect_intent(text: str) -> IntentResult | None:
     if any(marker in normalized_text for marker in MUSIC_INTENT_MARKERS):
         query = _extract_track_query(normalized_text)
         if query:
+            if any(term in normalized_text for term in TRACK_LOOKUP_CONTEXT_BLOCKLIST):
+                return None
+
+            query_words = query.split()
+            has_priority_connector = any(word in TRACK_LOOKUP_CONNECTORS for word in query_words)
+            if not has_priority_connector:
+                if query in TRACK_LOOKUP_QUERY_BLOCKLIST:
+                    return None
+                if len(query_words) > TRACK_LOOKUP_MAX_WORDS:
+                    return None
+
             return IntentResult(kind="track_lookup", query=query)
 
     return None
