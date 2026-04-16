@@ -200,20 +200,30 @@ async def _process_streaming_message(
     if not service:
         return
 
-    track_id = streaming_service.extract_track_id(service, url)
-    if not track_id:
-        return
+    track_id: str | None = None
+    cache_key: str
+    if service in {"Spotify", "Deezer"}:
+        track_id = streaming_service.extract_track_id(service, url)
+        if not track_id:
+            return
+        cache_key = f"{service}:{track_id}"
+    else:
+        cache_key = f"{service}:{url}"
 
-    cache_key = f"{service}:{track_id}"
     now = monotonic()
     cached = _streaming_result_cache.get(cache_key)
     if cached and now - cached[0] <= STREAMING_CACHE_TTL_SECONDS:
         track_data = cached[1]
     else:
         try:
-            resolved = await asyncio.wait_for(
-                streaming_service.resolve_track(service, track_id), timeout=4.5
-            )
+            if track_id:
+                resolved = await asyncio.wait_for(
+                    streaming_service.resolve_track(service, track_id), timeout=4.5
+                )
+            else:
+                resolved = await asyncio.wait_for(
+                    streaming_service.resolve_indirect_track(service, url), timeout=4.5
+                )
         except Exception:
             return
 
