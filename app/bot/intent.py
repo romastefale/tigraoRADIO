@@ -56,16 +56,25 @@ def detect_intent(text: str) -> IntentResult | None:
     if any(marker in normalized_text for marker in MUSIC_INTENT_MARKERS):
         query = _extract_track_query(normalized_text)
         if query:
+            if not query.strip() or len(query.strip()) < 3:
+                return None
+
             if any(term in normalized_text for term in TRACK_LOOKUP_CONTEXT_BLOCKLIST):
                 return None
 
             query_words = query.split()
+            has_explicit_track_intent = any(
+                marker in normalized_text
+                for marker in ("ouvindo", "escutando", "curtindo", "tocando", "agora")
+            )
+            if len(query_words) == 1 and not has_explicit_track_intent:
+                return None
+
             has_priority_connector = any(word in TRACK_LOOKUP_CONNECTORS for word in query_words)
-            if not has_priority_connector:
-                if query in TRACK_LOOKUP_QUERY_BLOCKLIST:
-                    return None
-                if len(query_words) > TRACK_LOOKUP_MAX_WORDS:
-                    return None
+            if query in TRACK_LOOKUP_QUERY_BLOCKLIST:
+                return None
+            if not has_priority_connector and len(query_words) > TRACK_LOOKUP_MAX_WORDS:
+                return None
 
             return IntentResult(kind="track_lookup", query=query)
 
