@@ -4,7 +4,7 @@ def detect_intent(text: str) -> str | None:
 
     text = text.strip().lower()
 
-    if text in ["tocando", "ouvindo", "qual música", "qual musica"]:
+    if text in ["tocando", "tigraofm", "radinho", "qap"]:
         return "play"
 
     return None
