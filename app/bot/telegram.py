@@ -407,7 +407,7 @@ def _register_handlers(dp: Dispatcher) -> None:
             private_missing_link_message=True,
         )
 
-    @dp.message(F.text)
+    @dp.message(F.text.contains("http"))
     async def streaming_link_listener(message: Message) -> None:
         text = message.text or ""
         if "http" not in text.lower():
