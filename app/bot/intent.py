@@ -44,6 +44,36 @@ def _extract_track_query(normalized_text: str) -> str | None:
     return query or None
 
 
+def _has_strong_connector_pattern(normalized_text: str) -> bool:
+    words = re.findall(r"[a-z0-9]+", normalized_text)
+    if len(words) < 3:
+        return False
+
+    context_blocklist = {_normalize(term) for term in TRACK_LOOKUP_CONTEXT_BLOCKLIST}
+    for idx in range(1, len(words) - 1):
+        if words[idx] not in TRACK_LOOKUP_CONNECTORS:
+            continue
+
+        left_words = words[:idx]
+        right_words = words[idx + 1 :]
+        if not left_words or not right_words:
+            continue
+
+        if all(word in context_blocklist for word in left_words):
+            continue
+        if all(word in context_blocklist for word in right_words):
+            continue
+
+        return True
+
+    return False
+
+
+def _contains_marker(normalized_text: str, marker: str) -> bool:
+    pattern = rf"\b{re.escape(marker).replace(r'\\ ', r'\\s+')}\b"
+    return bool(re.search(pattern, normalized_text))
+
+
 def detect_intent(text: str) -> IntentResult | None:
     if not text:
         return None
@@ -53,32 +83,41 @@ def detect_intent(text: str) -> IntentResult | None:
     if normalized_text in PLAY_TRIGGERS:
         return IntentResult(kind="play")
 
-    if any(marker in normalized_text for marker in MUSIC_INTENT_MARKERS):
+    if _has_strong_connector_pattern(normalized_text):
         query = _extract_track_query(normalized_text)
         if query:
-            if not query.strip() or len(query.strip()) < 3:
-                return None
-
-            if any(term in normalized_text for term in TRACK_LOOKUP_CONTEXT_BLOCKLIST):
-                return None
-
             query_words = query.split()
-            has_priority_connector = any(word in TRACK_LOOKUP_CONNECTORS for word in query_words)
-            if has_priority_connector:
-                return IntentResult(kind="track_lookup", query=query)
+            if len(query.strip()) >= 3 and len(query_words) <= TRACK_LOOKUP_MAX_WORDS:
+                if query not in TRACK_LOOKUP_QUERY_BLOCKLIST:
+                    return IntentResult(kind="track_lookup", query=query)
 
-            has_explicit_track_intent = any(
-                marker in normalized_text
-                for marker in ("ouvindo", "escutando", "curtindo", "tocando", "agora")
-            )
-            if len(query_words) == 1 and not has_explicit_track_intent:
-                return None
+    has_musical_intent = any(
+        _contains_marker(normalized_text, marker) for marker in MUSIC_INTENT_MARKERS
+    )
+    if has_musical_intent:
+        query = _extract_track_query(normalized_text)
+        if not query or len(query.strip()) < 3:
+            return None
 
-            if query in TRACK_LOOKUP_QUERY_BLOCKLIST:
-                return None
-            if len(query_words) > TRACK_LOOKUP_MAX_WORDS:
-                return None
+        query_words = query.split()
+        if not query_words:
+            return None
 
-            return IntentResult(kind="track_lookup", query=query)
+        normalized_context_blocklist = {_normalize(term) for term in TRACK_LOOKUP_CONTEXT_BLOCKLIST}
+        if any(word in normalized_context_blocklist for word in query_words):
+            return None
+
+        if query in TRACK_LOOKUP_QUERY_BLOCKLIST:
+            return None
+        if len(query_words) > TRACK_LOOKUP_MAX_WORDS:
+            return None
+
+        has_explicit_track_intent = any(
+            _contains_marker(normalized_text, marker) for marker in MUSIC_INTENT_MARKERS
+        )
+        if len(query_words) == 1 and not has_explicit_track_intent:
+            return None
+
+        return IntentResult(kind="track_lookup", query=query)
 
     return None
