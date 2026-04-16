@@ -30,10 +30,6 @@ class SpotifyService:
     async def shutdown(self) -> None:
         logger.info("Spotify service stopped.")
 
-    # ========================
-    # AUTH URL
-    # ========================
-
     def build_auth_url(self, user_id: int) -> str:
         return (
             "https://accounts.spotify.com/authorize"
@@ -49,10 +45,6 @@ class SpotifyService:
             return int(state)
         except Exception:
             return None
-
-    # ========================
-    # TOKEN EXCHANGE
-    # ========================
 
     async def exchange_code_for_token(self, db, code: str, user_id: int) -> None:
         auth_str = f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}"
@@ -102,10 +94,6 @@ class SpotifyService:
 
         db.commit()
 
-    # ========================
-    # REFRESH TOKEN
-    # ========================
-
     async def _refresh_token(self, db, token: SpotifyToken) -> SpotifyToken | None:
         auth_str = f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}"
         b64_auth = base64.b64encode(auth_str.encode()).decode()
@@ -139,10 +127,6 @@ class SpotifyService:
 
         return token
 
-    # ========================
-    # PLAYBACK
-    # ========================
-
     async def get_current_or_last_played(
         self, db, user_id: int
     ) -> dict[str, Any] | None:
@@ -160,7 +144,6 @@ class SpotifyService:
                 "album_image_url": None,
             }
 
-        # 🔥 refresh automático
         if token.expiration <= datetime.utcnow():
             refreshed = await self._refresh_token(db, token)
             if not refreshed:
@@ -176,45 +159,71 @@ class SpotifyService:
             token = refreshed
 
         async with httpx.AsyncClient() as client:
+
+            # 1) tenta música atual
             response = await client.get(
                 "https://api.spotify.com/v1/me/player/currently-playing",
                 headers={"Authorization": f"Bearer {token.access_token}"},
             )
 
-        if response.status_code == 204:
+            if response.status_code == 200:
+                data = response.json()
+                item = data.get("item")
+
+                if item:
+                    return {
+                        "source": "current",
+                        "played_at": None,
+                        "track_name": item["name"],
+                        "artist": item["artists"][0]["name"],
+                        "album": item["album"]["name"],
+                        "spotify_url": item["external_urls"]["spotify"],
+                        "album_image_url": item["album"]["images"][0]["url"],
+                    }
+
+            # 2) fallback: última música tocada
+            recent = await client.get(
+                "https://api.spotify.com/v1/me/player/recently-played?limit=1",
+                headers={"Authorization": f"Bearer {token.access_token}"},
+            )
+
+        if recent.status_code != 200:
+            logger.error("Spotify fallback error: %s", recent.text)
             return {
                 "source": "last",
                 "played_at": None,
-                "track_name": "Nada está tocando agora",
+                "track_name": "Erro ao acessar Spotify",
                 "artist": "Spotify",
                 "album": "",
                 "spotify_url": None,
                 "album_image_url": None,
             }
 
-        if response.status_code != 200:
-            logger.error("Spotify playback error: %s", response.text)
-            return None
+        data = recent.json()
+        items = data.get("items")
 
-        data = response.json()
-        item = data.get("item")
+        if not items:
+            return {
+                "source": "last",
+                "played_at": None,
+                "track_name": "Nada encontrado",
+                "artist": "Spotify",
+                "album": "",
+                "spotify_url": None,
+                "album_image_url": None,
+            }
 
-        if not item:
-            return None
+        track = items[0]["track"]
 
         return {
-            "source": "current",
-            "played_at": None,
-            "track_name": item["name"],
-            "artist": item["artists"][0]["name"],
-            "album": item["album"]["name"],
-            "spotify_url": item["external_urls"]["spotify"],
-            "album_image_url": item["album"]["images"][0]["url"],
+            "source": "last",
+            "played_at": items[0].get("played_at"),
+            "track_name": track["name"],
+            "artist": track["artists"][0]["name"],
+            "album": track["album"]["name"],
+            "spotify_url": track["external_urls"]["spotify"],
+            "album_image_url": track["album"]["images"][0]["url"],
         }
-
-    # ========================
-    # LOGOUT
-    # ========================
 
     async def clear_user_session(self, db, user_id: int) -> bool:
         token = db.query(SpotifyToken).filter_by(user_id=user_id).first()
