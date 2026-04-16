@@ -63,6 +63,10 @@ def detect_intent(text: str) -> IntentResult | None:
                 return None
 
             query_words = query.split()
+            has_priority_connector = any(word in TRACK_LOOKUP_CONNECTORS for word in query_words)
+            if has_priority_connector:
+                return IntentResult(kind="track_lookup", query=query)
+
             has_explicit_track_intent = any(
                 marker in normalized_text
                 for marker in ("ouvindo", "escutando", "curtindo", "tocando", "agora")
@@ -70,10 +74,9 @@ def detect_intent(text: str) -> IntentResult | None:
             if len(query_words) == 1 and not has_explicit_track_intent:
                 return None
 
-            has_priority_connector = any(word in TRACK_LOOKUP_CONNECTORS for word in query_words)
             if query in TRACK_LOOKUP_QUERY_BLOCKLIST:
                 return None
-            if not has_priority_connector and len(query_words) > TRACK_LOOKUP_MAX_WORDS:
+            if len(query_words) > TRACK_LOOKUP_MAX_WORDS:
                 return None
 
             return IntentResult(kind="track_lookup", query=query)
