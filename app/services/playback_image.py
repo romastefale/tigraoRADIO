@@ -10,7 +10,10 @@ import httpx
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 logger = logging.getLogger(__name__)
-CACHE_DIR = "app/cache/playback"
+
+# 🔧 corrigido (antes era app/cache/playback)
+CACHE_DIR = "./cache/playback"
+
 CANVAS_WIDTH = 1080
 COVER_SIZE = 1080
 BOTTOM_HEIGHT = 360
@@ -40,15 +43,19 @@ def _extract_track_id(track_id: str) -> str:
     return (track_id or "").strip()
 
 
+# 🔥 corrigido: download mais robusto + logs
 def _download_cover(cover_url: str) -> Image.Image | None:
     try:
-        response = httpx.get(cover_url, timeout=10.0)
-        response.raise_for_status()
+        with httpx.Client(timeout=10.0) as client:
+            response = client.get(cover_url)
+            response.raise_for_status()
+
         image = Image.open(io.BytesIO(response.content))
         image.load()
         return image.convert("RGB")
+
     except Exception as exc:
-        logger.warning("Failed to download Spotify cover", exc_info=exc)
+        logger.error("PLAYBACK: cover download failed", exc_info=exc)
         return None
 
 
@@ -61,6 +68,7 @@ def _load_fonts() -> tuple[ImageFont.ImageFont, ImageFont.ImageFont, ImageFont.I
             ImageFont.truetype("DejaVuSans.ttf", 40),
         )
     except Exception:
+        logger.warning("PLAYBACK: fallback font used")
         default = ImageFont.load_default()
         return (default, default, default, default)
 
@@ -77,7 +85,9 @@ def generate_card(
     canvas = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0))
     canvas.paste(cover, (0, 0))
 
-    blurred = cover.filter(ImageFilter.GaussianBlur(radius=32)).crop((0, COVER_SIZE - BOTTOM_HEIGHT, COVER_SIZE, COVER_SIZE))
+    blurred = cover.filter(ImageFilter.GaussianBlur(radius=32)).crop(
+        (0, COVER_SIZE - BOTTOM_HEIGHT, COVER_SIZE, COVER_SIZE)
+    )
     canvas.paste(blurred, (0, COVER_SIZE))
 
     overlay = Image.new("RGBA", (CANVAS_WIDTH, BOTTOM_HEIGHT), (0, 0, 0, 110))
@@ -101,11 +111,14 @@ def generate_card(
     for text, font in lines:
         if not text:
             continue
+
         clipped = text
         bbox = draw.textbbox((0, 0), clipped, font=font)
+
         while bbox[2] > max_width and len(clipped) > 1:
             clipped = f"{clipped[:-2]}…"
             bbox = draw.textbbox((0, 0), clipped, font=font)
+
         draw.text((x, y), clipped, fill=text_color, font=font)
         y += bbox[3] + 10
 
@@ -122,11 +135,13 @@ def get_or_create_image(
 ) -> str | None:
     normalized_track_id = _extract_track_id(track_id)
     if not normalized_track_id or not cover_url:
+        logger.error("PLAYBACK: missing track_id or cover_url")
         return None
 
     normalized_user = (user_label or "").strip() or "unknown"
     cache_key = f"{normalized_track_id}|{normalized_user}"
     output_path = os.path.join(CACHE_DIR, _safe_name(cache_key))
+
     if os.path.exists(output_path):
         return output_path
 
@@ -135,9 +150,12 @@ def get_or_create_image(
         return None
 
     try:
-        card_image = generate_card(cover_image, title, artist, album, normalized_user)
+        card_image = generate_card(
+            cover_image, title, artist, album, normalized_user
+        )
         save_atomic(card_image, output_path)
         return output_path
+
     except Exception as exc:
-        logger.warning("Failed generating playback card", exc_info=exc)
+        logger.error("PLAYBACK: image generation failed", exc_info=exc)
         return None
