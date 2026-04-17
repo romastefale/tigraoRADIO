@@ -7,20 +7,21 @@ import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command
 from aiogram.types import Message, InlineQuery, InlineQueryResultPhoto
 from sqlalchemy.orm import Session
 
 from app.bot.intent import detect_intent
-from app.bot.playback import register_playback_handler
+from app.bot.playback import playback_router, register_playback_handler
 from app.config.settings import TELEGRAM_BOT_TOKEN
 from app.core.runtime import allow
 from app.db.database import SessionLocal
 from app.services.spotify import spotify_service
 
 logger = logging.getLogger(__name__)
+main_router = Router()
 
 bot_dispatcher: Dispatcher | None = None
 bot_polling_task: asyncio.Task[None] | None = None
@@ -228,7 +229,7 @@ def _register_handlers(dp: Dispatcher) -> None:
 
     register_playback_handler(dp)
 
-    @dp.message(F.text)
+    @main_router.message(F.text)
     async def natural_handler(message: Message) -> None:
         if not message.text or not message.from_user:
             return
@@ -247,6 +248,9 @@ def _register_handlers(dp: Dispatcher) -> None:
         intent = detect_intent(message.text)
         if intent == "play":
             await play(message)
+
+    dp.include_router(playback_router)
+    dp.include_router(main_router)
 
 
 async def startup_telegram_bot() -> None:

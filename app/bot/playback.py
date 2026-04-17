@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from aiogram import Dispatcher, F
+from aiogram import Dispatcher, F, Router
 from aiogram.filters import Command
 from aiogram.types import FSInputFile, Message
 
@@ -13,6 +13,7 @@ from app.services.spotify import spotify_service
 
 logger = logging.getLogger(__name__)
 PLAYBACK_TRIGGERS = {"pb", "pty", "strm", "djpidro", "mv", "musicart"}
+playback_router = Router()
 
 
 def _track_id_from_spotify_url(spotify_url: str | None) -> str | None:
@@ -81,7 +82,7 @@ def register_playback_handler(dp: Dispatcher) -> None:
     async def playback(message: Message) -> None:
         await handle_playback(message)
 
-    @dp.message(F.text)
+    @playback_router.message(F.text)
     async def playback_trigger(message: Message) -> None:
         if message.text is None:
             return
