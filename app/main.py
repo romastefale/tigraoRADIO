@@ -5,7 +5,7 @@ import logging
 from collections.abc import Generator
 
 from fastapi import Depends, FastAPI, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.bot.telegram import shutdown_telegram_bot, startup_telegram_bot
@@ -95,6 +95,11 @@ async def spotify_callback(
         "status": "ok",
         "message": "Spotify conectado com sucesso!",
     }
+
+
+@app.get("/webapp")
+def webapp_player() -> FileResponse:
+    return FileResponse("app/webapp/player.html")
 
 
 @app.get("/spotify/track")
