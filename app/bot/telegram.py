@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command
-from aiogram.types import InlineQuery, InlineQueryResultPhoto, Message
+from aiogram.types import BufferedInputFile, InlineQuery, InlineQueryResultPhoto, Message
 from sqlalchemy.orm import Session
 
 from app.bot.intent import detect_intent
@@ -17,6 +17,7 @@ from app.bot.playback import playback_router
 from app.config.settings import BASE_URL, TELEGRAM_BOT_TOKEN
 from app.core.runtime import allow
 from app.db.database import SessionLocal
+from app.render.renderer import render_image
 from app.services.spotify import spotify_service
 
 logger = logging.getLogger(__name__)
@@ -218,6 +219,39 @@ def _register_handlers(dp: Dispatcher) -> None:
         finally:
             db.close()
 
+    @dp.message(Command("playimg"))
+    async def playimg(message: Message) -> None:
+        user_id = message.from_user.id if message.from_user else 0
+        db = _new_session()
+        try:
+            track = await spotify_service.get_current_or_last_played(db, user_id)
+            if not track:
+                raise RuntimeError("Missing track data")
+
+            cover_url = str(track.get("album_image_url") or "").strip()
+            if not cover_url:
+                raise RuntimeError("Missing cover url")
+
+            payload = {
+                "USER": _telegram_identity(message),
+                "TRACK": str(track.get("track_name") or ""),
+                "ARTIST": str(track.get("artist") or ""),
+                "ALBUM": str(track.get("album") or ""),
+                "COVER": cover_url,
+            }
+
+            image_bytes = await render_image(payload)
+            if not image_bytes:
+                raise RuntimeError("Empty image bytes")
+
+            await message.answer_photo(
+                photo=BufferedInputFile(image_bytes, filename="playimg.png")
+            )
+        except Exception:
+            await play(message)
+        finally:
+            db.close()
+
     @dp.message(Command("logout"))
     async def logout(message: Message) -> None:
         user_id = message.from_user.id if message.from_user else 0
@@ -255,6 +289,8 @@ def _register_handlers(dp: Dispatcher) -> None:
         intent = detect_intent(message.text)
         if intent == "play":
             await play(message)
+        if intent == "playimg":
+            await playimg(message)
 
     _handlers_registered = True
 
