@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Generator
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, FileResponse
 from sqlalchemy.orm import Session
 
 from app.bot.telegram import shutdown_telegram_bot, startup_telegram_bot
@@ -15,6 +16,8 @@ from app.services.spotify import spotify_service
 
 app = FastAPI(title="Minimal Backend")
 logger = logging.getLogger(__name__)
+
+BASE_DIR = Path(__file__).resolve().parent
 
 
 def _log_background_task_result(task: asyncio.Task[None], task_name: str) -> None:
@@ -53,6 +56,14 @@ def get_db() -> Generator[Session, None, None]:
 @app.get("/healthz", status_code=200)
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# ========================
+# NOVA ROTA (WEBAPP)
+# ========================
+@app.get("/webapp")
+def webapp() -> FileResponse:
+    return FileResponse(BASE_DIR / "webapp" / "player.html")
 
 
 @app.get("/spotify/login")
