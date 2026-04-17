@@ -14,6 +14,7 @@ from aiogram.types import Message, InlineQuery, InlineQueryResultPhoto
 from sqlalchemy.orm import Session
 
 from app.bot.intent import detect_intent
+from app.bot.playback import register_playback_handler
 from app.config.settings import TELEGRAM_BOT_TOKEN
 from app.core.runtime import allow
 from app.db.database import SessionLocal
@@ -224,6 +225,8 @@ def _register_handlers(dp: Dispatcher) -> None:
             await _handle_spotify_error(message, exc)
         finally:
             db.close()
+
+    register_playback_handler(dp)
 
     @dp.message(F.text)
     async def natural_handler(message: Message) -> None:
