@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from aiogram import Dispatcher
+from aiogram import Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import FSInputFile, Message
 
@@ -12,6 +12,7 @@ from app.services.playback_image import get_or_create_image
 from app.services.spotify import spotify_service
 
 logger = logging.getLogger(__name__)
+PLAYBACK_TRIGGERS = {"pb", "pty", "strm", "djpidro", "mv", "musicart"}
 
 
 def _track_id_from_spotify_url(spotify_url: str | None) -> str | None:
@@ -25,48 +26,67 @@ def _track_id_from_spotify_url(spotify_url: str | None) -> str | None:
     return cleaned.rsplit("/", 1)[-1] or None
 
 
+def is_playback_trigger(text: str) -> bool:
+    words = text.lower().split()
+    return any(word in PLAYBACK_TRIGGERS for word in words)
+
+
+async def handle_playback(message: Message) -> None:
+    user_id = message.from_user.id if message.from_user else 0
+    db = SessionLocal()
+
+    try:
+        token = db.query(SpotifyToken).filter_by(user_id=user_id).first()
+        if not token:
+            await message.answer("Use /login para conectar o Spotify antes de /playback.")
+            return
+
+        track = await spotify_service.get_current_or_last_played(db, user_id)
+        if not track:
+            await message.answer("Nada está tocando agora.")
+            return
+
+        track_id = _track_id_from_spotify_url(track.get("spotify_url"))
+        cover_url = track.get("album_image_url")
+        title = str(track.get("track_name") or "")
+        artist = str(track.get("artist") or "")
+        album = str(track.get("album") or "")
+
+        if not track_id or not cover_url:
+            await message.answer("Nada está tocando agora.")
+            return
+
+        image_path = get_or_create_image(
+            track_id=track_id,
+            cover_url=str(cover_url),
+            title=title,
+            artist=artist,
+            album=album,
+        )
+
+        if not image_path:
+            await message.answer("Não foi possível gerar a imagem agora.")
+            return
+
+        await message.answer_photo(photo=FSInputFile(image_path))
+    except Exception as exc:
+        logger.exception("/playback failed", exc_info=exc)
+        await message.answer("Não foi possível concluir /playback no momento.")
+    finally:
+        db.close()
+
+
 def register_playback_handler(dp: Dispatcher) -> None:
     @dp.message(Command("playback"))
     async def playback(message: Message) -> None:
-        user_id = message.from_user.id if message.from_user else 0
-        db = SessionLocal()
+        await handle_playback(message)
 
-        try:
-            token = db.query(SpotifyToken).filter_by(user_id=user_id).first()
-            if not token:
-                await message.answer("Use /login para conectar o Spotify antes de /playback.")
-                return
+    @dp.message(F.text)
+    async def playback_trigger(message: Message) -> None:
+        if message.text is None:
+            return
 
-            track = await spotify_service.get_current_or_last_played(db, user_id)
-            if not track:
-                await message.answer("Nada está tocando agora.")
-                return
+        if not is_playback_trigger(message.text):
+            return
 
-            track_id = _track_id_from_spotify_url(track.get("spotify_url"))
-            cover_url = track.get("album_image_url")
-            title = str(track.get("track_name") or "")
-            artist = str(track.get("artist") or "")
-            album = str(track.get("album") or "")
-
-            if not track_id or not cover_url:
-                await message.answer("Nada está tocando agora.")
-                return
-
-            image_path = get_or_create_image(
-                track_id=track_id,
-                cover_url=str(cover_url),
-                title=title,
-                artist=artist,
-                album=album,
-            )
-
-            if not image_path:
-                await message.answer("Não foi possível gerar a imagem agora.")
-                return
-
-            await message.answer_photo(photo=FSInputFile(image_path))
-        except Exception as exc:
-            logger.exception("/playback failed", exc_info=exc)
-            await message.answer("Não foi possível concluir /playback no momento.")
-        finally:
-            db.close()
+        await handle_playback(message)
