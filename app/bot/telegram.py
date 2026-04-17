@@ -250,6 +250,8 @@ def _register_handlers(dp: Dispatcher) -> None:
 async def startup_telegram_bot() -> None:
     global bot_dispatcher, bot_polling_task
 
+    logger.info("TELEGRAM: startup iniciado")
+    logger.info("TELEGRAM: token presente? %s", bool(TELEGRAM_BOT_TOKEN))
     if not TELEGRAM_BOT_TOKEN:
         logger.warning("TELEGRAM_BOT_TOKEN missing; Telegram bot is disabled")
         return
@@ -258,9 +260,11 @@ async def startup_telegram_bot() -> None:
         return
 
     bot = Bot(token=TELEGRAM_BOT_TOKEN, session=AiohttpSession(timeout=10))
+    logger.info("TELEGRAM: bot criado")
     bot_dispatcher = Dispatcher()
     _register_handlers(bot_dispatcher)
 
+    logger.info("TELEGRAM: iniciando polling")
     bot_polling_task = asyncio.create_task(bot_dispatcher.start_polling(bot))
 
 
