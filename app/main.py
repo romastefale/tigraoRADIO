@@ -4,17 +4,22 @@ import asyncio
 import logging
 from collections.abc import Generator
 
-from fastapi import Depends, FastAPI, Query
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.bot.telegram import shutdown_telegram_bot, startup_telegram_bot
+from aiogram import Bot
+
+from app.bot.telegram import shutdown_telegram_bot, startup_telegram_bot, bot_dispatcher
+from app.config.settings import TELEGRAM_BOT_TOKEN
 from app.db.database import SessionLocal, init_db
 from app.services.spotify import spotify_service
 
 
 app = FastAPI(title="Minimal Backend")
 logger = logging.getLogger(__name__)
+
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
 
 def _log_background_task_result(task: asyncio.Task[None], task_name: str) -> None:
@@ -103,3 +108,11 @@ async def spotify_track(
     db: Session = Depends(get_db),
 ) -> dict[str, str | None] | None:
     return await spotify_service.get_current_or_last_played(db, user_id)
+
+
+# 🔥 CORREÇÃO: ROTA DO WEBHOOK (ESSENCIAL)
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
+    update = await request.json()
+    await bot_dispatcher.feed_update(bot, update)
+    return {"ok": True}
