@@ -28,6 +28,7 @@ def _log_background_task_result(task: asyncio.Task[None], task_name: str) -> Non
 
 @app.on_event("startup")
 async def on_startup() -> None:
+    __import__("os").makedirs("cache", exist_ok=True)
     init_db()
 
     telegram_startup_task = asyncio.create_task(startup_telegram_bot())
