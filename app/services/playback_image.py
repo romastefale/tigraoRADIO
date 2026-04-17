@@ -11,7 +11,6 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 logger = logging.getLogger(__name__)
 
-# 🔧 corrigido (antes era app/cache/playback)
 CACHE_DIR = "./cache/playback"
 
 CANVAS_WIDTH = 1080
@@ -43,15 +42,19 @@ def _extract_track_id(track_id: str) -> str:
     return (track_id or "").strip()
 
 
-# 🔥 corrigido: download mais robusto + logs
 def _download_cover(cover_url: str) -> Image.Image | None:
     try:
+        logger.error("PLAYBACK: downloading cover %s", cover_url)
+
         with httpx.Client(timeout=10.0) as client:
             response = client.get(cover_url)
             response.raise_for_status()
 
         image = Image.open(io.BytesIO(response.content))
         image.load()
+
+        logger.error("PLAYBACK: cover downloaded successfully")
+
         return image.convert("RGB")
 
     except Exception as exc:
@@ -133,6 +136,7 @@ def get_or_create_image(
     album: str,
     user_label: str,
 ) -> str | None:
+
     normalized_track_id = _extract_track_id(track_id)
     if not normalized_track_id or not cover_url:
         logger.error("PLAYBACK: missing track_id or cover_url")
@@ -143,6 +147,7 @@ def get_or_create_image(
     output_path = os.path.join(CACHE_DIR, _safe_name(cache_key))
 
     if os.path.exists(output_path):
+        logger.error("PLAYBACK: cache hit %s", output_path)
         return output_path
 
     cover_image = _download_cover(cover_url)
@@ -150,10 +155,29 @@ def get_or_create_image(
         return None
 
     try:
+        logger.error("PLAYBACK: generating image")
+
         card_image = generate_card(
-            cover_image, title, artist, album, normalized_user
+            cover_image,
+            title,
+            artist,
+            album,
+            normalized_user
         )
+
         save_atomic(card_image, output_path)
+
+        # 🔥 validação real do arquivo
+        if not os.path.exists(output_path):
+            logger.error("PLAYBACK: file not created")
+            return None
+
+        if os.path.getsize(output_path) == 0:
+            logger.error("PLAYBACK: file is empty")
+            return None
+
+        logger.error("PLAYBACK: image ready at %s", output_path)
+
         return output_path
 
     except Exception as exc:
