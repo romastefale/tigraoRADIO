@@ -235,7 +235,7 @@ def _register_handlers(dp: Dispatcher) -> None:
             })
 
             # ⚠️ TROQUE PELO SEU DOMÍNIO
-            url = f"http://SEU_DOMINIO/webapp?{query}"
+            url = f"url = f"https://tigraoradio-production.up.railway.app/webapp?{query}"
 
             await message.answer(f"🎧 Abrir interface:\n{url}")
 
