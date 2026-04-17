@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import html
 import logging
 import uuid
@@ -10,24 +9,27 @@ from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command
-from aiogram.types import Message, InlineQuery, InlineQueryResultPhoto
+from aiogram.types import InlineQuery, InlineQueryResultPhoto, Message
 from sqlalchemy.orm import Session
 
 from app.bot.intent import detect_intent
 from app.bot.playback import playback_router
-from app.config.settings import TELEGRAM_BOT_TOKEN
+from app.config.settings import BASE_URL, TELEGRAM_BOT_TOKEN
 from app.core.runtime import allow
 from app.db.database import SessionLocal
 from app.services.spotify import spotify_service
 
 logger = logging.getLogger(__name__)
 
-bot_dispatcher: Dispatcher | None = None
-bot_polling_task: asyncio.Task[None] | None = None
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 BLOCKED_WORDS = ["palavra1", "palavra2"]
 
-# ========================
+# Webhook mode: dispatcher must exist at import time
+bot_dispatcher = Dispatcher()
+bot: Bot | None = None
+_handlers_registered = False
+
+
 def _new_session() -> Session:
     return SessionLocal()
 
@@ -87,10 +89,11 @@ def _play_caption(
 
 
 def _register_handlers(dp: Dispatcher) -> None:
+    global _handlers_registered
+    if _handlers_registered:
+        return
 
-    # ========================
-    # INLINE MODE
-    # ========================
+    # Inline mode
     @dp.inline_query()
     async def inline_play(query: InlineQuery) -> None:
         text = (query.query or "").strip().lower()
@@ -120,8 +123,8 @@ def _register_handlers(dp: Dispatcher) -> None:
 
             result = InlineQueryResultPhoto(
                 id=str(uuid.uuid4()),
-                photo_url=album_image_url,
-                thumbnail_url=album_image_url,
+                photo_url=str(album_image_url),
+                thumbnail_url=str(album_image_url),
                 caption=caption,
                 parse_mode="HTML",
             )
@@ -131,10 +134,7 @@ def _register_handlers(dp: Dispatcher) -> None:
         finally:
             db.close()
 
-    # ========================
-    # COMMANDS
-    # ========================
-
+    # Commands
     @dp.message(Command("start"))
     async def start(message: Message) -> None:
         if message.chat.type == "private":
@@ -158,12 +158,19 @@ def _register_handlers(dp: Dispatcher) -> None:
             "Comandos:\n"
             "/login - conectar Spotify\n"
             "/logout - desconectar Spotify\n"
-            "/play - mostrar música atual\n\n"
+            "/play - mostrar música atual\n"
+            "/playback - gerar imagem da música atual\n\n"
             "Você também pode usar mensagens:\n"
             '"tocando"\n'
             '"tigraofm"\n'
             '"radinho"\n'
-            '"qap"'
+            '"qap"\n'
+            '"pb"\n'
+            '"pty"\n'
+            '"strm"\n'
+            '"djpidro"\n'
+            '"mv"\n'
+            '"musicart"'
         )
 
     @dp.message(Command("login"))
@@ -226,6 +233,7 @@ def _register_handlers(dp: Dispatcher) -> None:
         finally:
             db.close()
 
+    # Playback router before generic natural-text handler
     dp.include_router(playback_router)
 
     @dp.message(F.text)
@@ -248,34 +256,39 @@ def _register_handlers(dp: Dispatcher) -> None:
         if intent == "play":
             await play(message)
 
+    _handlers_registered = True
+
 
 async def startup_telegram_bot() -> None:
-    global bot_dispatcher, bot_polling_task
+    global bot
 
     if not TELEGRAM_BOT_TOKEN:
         logger.warning("TELEGRAM_BOT_TOKEN missing; Telegram bot is disabled")
         return
 
-    if bot_polling_task and not bot_polling_task.done():
-        return
+    if bot is None:
+        bot = Bot(token=TELEGRAM_BOT_TOKEN, session=AiohttpSession(timeout=10))
 
-    bot = Bot(token=TELEGRAM_BOT_TOKEN, session=AiohttpSession(timeout=10))
-    bot_dispatcher = Dispatcher()
     _register_handlers(bot_dispatcher)
 
-    bot_polling_task = asyncio.create_task(bot_dispatcher.start_polling(bot))
+    if BASE_URL:
+        webhook_url = f"{BASE_URL.rstrip('/')}/webhook"
+        await bot.set_webhook(webhook_url)
+        logger.info("Webhook configured: %s", webhook_url)
+    else:
+        logger.warning("BASE_URL missing; webhook was not configured")
 
 
 async def shutdown_telegram_bot() -> None:
-    global bot_polling_task
+    global bot
 
-    if bot_polling_task is None:
+    if bot is None:
         return
 
-    bot_polling_task.cancel()
     try:
-        await bot_polling_task
-    except asyncio.CancelledError:
-        pass
-    finally:
-        bot_polling_task = None
+        await bot.delete_webhook(drop_pending_updates=False)
+    except Exception:
+        logger.exception("Failed to delete webhook on shutdown")
+
+    await bot.session.close()
+    bot = None
