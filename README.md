@@ -8,12 +8,19 @@ Bot Telegram que mostra a música atual do Spotify.
 - /login
 - /logout
 - /play
+- /playback
 
 ## Gatilhos
 - tocando
 - tigraofm
 - radinho
 - qap
+- pb
+- pty
+- strm
+- djpidro
+- mv
+- musicart
 
 ## Execução
 - Python
