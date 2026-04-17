@@ -113,6 +113,12 @@ async def spotify_track(
 # 🔥 CORREÇÃO: ROTA DO WEBHOOK (ESSENCIAL)
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
+    from app.bot.telegram import bot, bot_dispatcher
+
+    if bot is None:
+        logger.error("Webhook received update but Telegram bot is not initialized")
+        return {"ok": False, "message": "bot not initialized"}
+
     update = await request.json()
-    await bot_dispatcher.feed_update(bot, update)
+    await bot_dispatcher.feed_raw_update(bot, update)
     return {"ok": True}
