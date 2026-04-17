@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from aiogram import Dispatcher
 from aiogram.filters import Command
@@ -39,7 +40,6 @@ def register_playback_handler(dp: Dispatcher) -> None:
 
             track = await spotify_service.get_current_or_last_played(db, user_id)
             if not track:
-                await message.answer("Nada está tocando agora.")
                 return
 
             track_id = _track_id_from_spotify_url(track.get("spotify_url"))
@@ -49,7 +49,6 @@ def register_playback_handler(dp: Dispatcher) -> None:
             album = str(track.get("album") or "")
 
             if not track_id or not cover_url:
-                await message.answer("Nada está tocando agora.")
                 return
 
             image_path = get_or_create_image(
@@ -60,8 +59,17 @@ def register_playback_handler(dp: Dispatcher) -> None:
                 album=album,
             )
 
+            if image_path is None:
+                return
+
+            if not isinstance(image_path, str):
+                return
+
+            image_path = image_path.strip()
             if not image_path:
-                await message.answer("Não foi possível gerar a imagem agora.")
+                return
+
+            if not os.path.exists(image_path):
                 return
 
             await message.answer_photo(photo=FSInputFile(image_path))
