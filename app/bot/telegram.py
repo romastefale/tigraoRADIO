@@ -210,6 +210,40 @@ def _register_handlers(dp: Dispatcher) -> None:
         finally:
             db.close()
 
+    # ========================
+    # NOVO COMANDO (ISOLADO)
+    # ========================
+    @dp.message(Command("webapp"))
+    async def webapp_command(message: Message) -> None:
+        user_id = message.from_user.id if message.from_user else 0
+        db = _new_session()
+
+        try:
+            track = await spotify_service.get_current_or_last_played(db, user_id)
+
+            if not track:
+                await message.answer("Nada está tocando agora.")
+                return
+
+            from urllib.parse import urlencode
+
+            query = urlencode({
+                "track_name": str(track.get("track_name") or ""),
+                "artist_name": str(track.get("artist") or ""),
+                "album_name": str(track.get("album") or ""),
+                "cover_url": str(track.get("album_image_url") or ""),
+            })
+
+            # ⚠️ TROQUE PELO SEU DOMÍNIO
+            url = f"http://SEU_DOMINIO/webapp?{query}"
+
+            await message.answer(f"🎧 Abrir interface:\n{url}")
+
+        except Exception as exc:
+            await _handle_spotify_error(message, exc)
+        finally:
+            db.close()
+
     @dp.message(Command("logout"))
     async def logout(message: Message) -> None:
         user_id = message.from_user.id if message.from_user else 0
