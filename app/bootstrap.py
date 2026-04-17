@@ -4,6 +4,8 @@ import os
 
 import uvicorn
 
+os.makedirs("cache", exist_ok=True)
+
 
 if __name__ == "__main__":
     uvicorn.run(
