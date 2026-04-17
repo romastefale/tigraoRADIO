@@ -114,3 +114,4 @@ async def spotify_track(
     db: Session = Depends(get_db),
 ) -> dict[str, str | None] | None:
     return await spotify_service.get_current_or_last_played(db, user_id)
+    
