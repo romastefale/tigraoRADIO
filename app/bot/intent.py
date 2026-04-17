@@ -7,4 +7,7 @@ def detect_intent(text: str) -> str | None:
     if text in ["tocando", "cebrutius", "tigraofm", "djpi", "royalfm", "geeksfm", "radinho", "qap"]:
         return "play"
 
+    if text in ["pim", "strm", "pidj", "mv"]:
+        return "playimg"
+
     return None
