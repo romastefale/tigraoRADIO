@@ -122,6 +122,8 @@
     </article>
 
     <script>
+      window.__PLAYER_DATA__ = __PLAYER_DATA__;
+
       const mockData = {
         track_name: "Blinding Lights",
         artist_name: "The Weeknd",
@@ -131,11 +133,15 @@
       };
 
       const params = new URLSearchParams(window.location.search);
+      const serverData = window.__PLAYER_DATA__ || {};
       const data = {
-        track_name: params.get("track_name") || mockData.track_name,
-        artist_name: params.get("artist_name") || mockData.artist_name,
-        album_name: params.get("album_name") || mockData.album_name,
-        cover_url: params.get("cover_url") || mockData.cover_url,
+        track_name:
+          serverData.track_name || params.get("track_name") || mockData.track_name,
+        artist_name:
+          serverData.artist_name || params.get("artist_name") || mockData.artist_name,
+        album_name:
+          serverData.album_name || params.get("album_name") || mockData.album_name,
+        cover_url: serverData.cover_url || params.get("cover_url") || mockData.cover_url,
       };
 
       const cover = document.getElementById("cover");
