@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+import os
 
-from aiogram import Dispatcher, F
+from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import FSInputFile, Message
 
@@ -13,6 +14,7 @@ from app.services.spotify import spotify_service
 
 logger = logging.getLogger(__name__)
 PLAYBACK_TRIGGERS = {"pb", "pty", "strm", "djpidro", "mv", "musicart"}
+playback_router = Router(name="playback")
 
 
 def _track_id_from_spotify_url(spotify_url: str | None) -> str | None:
@@ -24,6 +26,17 @@ def _track_id_from_spotify_url(spotify_url: str | None) -> str | None:
         return None
 
     return cleaned.rsplit("/", 1)[-1] or None
+
+
+def _playback_user_label(message: Message) -> str:
+    user = message.from_user
+    if not user:
+        return "unknown"
+
+    if user.username:
+        return f"@{user.username}"
+
+    return user.full_name
 
 
 def is_playback_trigger(text: str) -> bool:
@@ -38,12 +51,10 @@ async def handle_playback(message: Message) -> None:
     try:
         token = db.query(SpotifyToken).filter_by(user_id=user_id).first()
         if not token:
-            await message.answer("Use /login para conectar o Spotify antes de /playback.")
             return
 
         track = await spotify_service.get_current_or_last_played(db, user_id)
         if not track:
-            await message.answer("Nada está tocando agora.")
             return
 
         track_id = _track_id_from_spotify_url(track.get("spotify_url"))
@@ -52,8 +63,10 @@ async def handle_playback(message: Message) -> None:
         artist = str(track.get("artist") or "")
         album = str(track.get("album") or "")
 
-        if not track_id or not cover_url:
-            await message.answer("Nada está tocando agora.")
+        if not track_id:
+            return
+
+        if not cover_url:
             return
 
         image_path = get_or_create_image(
@@ -62,31 +75,36 @@ async def handle_playback(message: Message) -> None:
             title=title,
             artist=artist,
             album=album,
+            user_label=_playback_user_label(message),
         )
 
-        if not image_path:
-            await message.answer("Não foi possível gerar a imagem agora.")
+        if not isinstance(image_path, str):
+            return
+
+        if not image_path.strip():
+            return
+
+        if not os.path.exists(image_path):
             return
 
         await message.answer_photo(photo=FSInputFile(image_path))
     except Exception as exc:
         logger.exception("/playback failed", exc_info=exc)
-        await message.answer("Não foi possível concluir /playback no momento.")
     finally:
         db.close()
 
 
-def register_playback_handler(dp: Dispatcher) -> None:
-    @dp.message(Command("playback"))
-    async def playback(message: Message) -> None:
-        await handle_playback(message)
+@playback_router.message(Command("playback"))
+async def playback(message: Message) -> None:
+    await handle_playback(message)
 
-    @dp.message(F.text)
-    async def playback_trigger(message: Message) -> None:
-        if message.text is None:
-            return
 
-        if not is_playback_trigger(message.text):
-            return
+@playback_router.message(F.text)
+async def playback_trigger(message: Message) -> None:
+    if message.text is None:
+        return
 
-        await handle_playback(message)
+    if not is_playback_trigger(message.text):
+        return
+
+    await handle_playback(message)
