@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Generator
 
 from fastapi import Depends, FastAPI, Query
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.bot.telegram import shutdown_telegram_bot, startup_telegram_bot
@@ -98,8 +99,24 @@ async def spotify_callback(
 
 
 @app.get("/webapp")
-def webapp_player() -> FileResponse:
-    return FileResponse("app/webapp/player.html")
+def webapp_player(
+    track_name: str | None = Query(default=None),
+    artist_name: str | None = Query(default=None),
+    album_name: str | None = Query(default=None),
+    cover_url: str | None = Query(default=None),
+) -> HTMLResponse:
+    with open("app/webapp/player.html", encoding="utf-8") as html_file:
+        html_content = html_file.read()
+
+    player_data = {
+        "track_name": track_name,
+        "artist_name": artist_name,
+        "album_name": album_name,
+        "cover_url": cover_url,
+    }
+    safe_player_data = json.dumps(player_data, ensure_ascii=False).replace("<", "\\u003c")
+
+    return HTMLResponse(html_content.replace("__PLAYER_DATA__", safe_player_data))
 
 
 @app.get("/spotify/track")
