@@ -147,13 +147,13 @@ def _register_handlers(dp: Dispatcher) -> None:
             await message.answer(
                 "🎧 Bem-vindo ao Tigrao Radio Bot\n\n"
                 "Use /login para conectar seu Spotify\n"
-                'e depois use /play ou "tocando"'
+                'e depois use /playing ou "tocando"'
             )
             return
 
         await message.answer(
             "🎧 Tigrao Radio ativo.\n\n"
-            'Use /login no privado e depois use /play ou "tocando"'
+            'Use /login no privado e depois use /playing ou "tocando"'
         )
 
     @dp.message(Command("help"))
@@ -164,7 +164,7 @@ def _register_handlers(dp: Dispatcher) -> None:
             "Comandos:\n"
             "/login - conectar Spotify\n"
             "/logout - desconectar Spotify\n"
-            "/play - mostrar música atual\n\n"
+            "/playing - mostrar música atual\n\n"
             "Você também pode usar mensagens:\n"
             '"tocando"\n'
             '"tigraofm"\n'
@@ -182,43 +182,8 @@ def _register_handlers(dp: Dispatcher) -> None:
         link = spotify_service.build_auth_url(user_id)
         await message.answer(f"Authorize Spotify access: {link}")
 
-    @dp.message(Command("play"))
-    async def play(message: Message) -> None:
-        user_id = message.from_user.id if message.from_user else 0
-        db = _new_session()
-        try:
-            track = await spotify_service.get_current_or_last_played(db, user_id)
-            if not track:
-                await message.answer("Nada está tocando agora.")
-                return
-
-            username = _telegram_identity(message)
-            status_line = _format_play_status(track, username)
-            caption = _play_caption(
-                status_line=status_line,
-                spotify_url=track.get("spotify_url"),
-                track_name=str(track.get("track_name") or ""),
-                artist=str(track.get("artist") or ""),
-            )
-
-            album_image_url = track.get("album_image_url")
-            if album_image_url:
-                await message.answer_photo(
-                    photo=str(album_image_url),
-                    caption=caption,
-                    parse_mode="HTML",
-                )
-                return
-
-            await message.answer(caption, parse_mode="HTML")
-
-        except Exception as exc:
-            await _handle_spotify_error(message, exc)
-        finally:
-            db.close()
-
     @dp.message(Command("playing"))
-    async def playing(message: Message) -> None:
+    async def play(message: Message) -> None:
         user_id = message.from_user.id if message.from_user else 0
         db = _new_session()
         try:
@@ -232,31 +197,28 @@ def _register_handlers(dp: Dispatcher) -> None:
                 await message.answer("Não foi possível identificar a música atual.")
                 return
 
+            track_url = str(track.get("spotify_url") or "")
             await likes_service.register_play(db, user_id, track_id)
 
             total_plays = await likes_service.get_track_play_count(db, track_id)
-            user_plays = await likes_service.get_user_play_count(db, user_id, track_id)
-            liked = await likes_service.is_track_liked(db, user_id, track_id)
             total_likes = await likes_service.get_track_like_count(db, track_id)
 
             username = _telegram_identity(message)
-            track_url = str(track.get("spotify_url") or "")
+            user_link = f"tg://user?id={user_id}"
             track_name = str(track.get("track_name") or "")
             artist = str(track.get("artist") or "")
 
             caption = (
-                f"🎹 {html.escape(username)} está ouvindo…\n\n"
+                f"🎹 <b><a href=\"{html.escape(user_link)}\">{html.escape(username)}</a></b> está ouvindo…\n\n"
                 f"🎧 <b><a href=\"{html.escape(track_url)}\">{html.escape(track_name)}</a></b> "
-                f"— <i>{html.escape(artist)}</i>\n\n"
-                f"Você já tocou esta faixa {user_plays} vez(es)."
+                f"— <i>{html.escape(artist)}</i>"
             )
 
-            like_icon = "♥" if liked else "♡"
             keyboard = InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text=f"🎵 {total_plays} · {like_icon} {total_likes}",
+                            text=f"🎵 {total_plays} · ♡ {total_likes}",
                             callback_data="playing_stats",
                         )
                     ]
