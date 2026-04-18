@@ -254,7 +254,34 @@ def _register_handlers(dp: Dispatcher) -> None:
 
     @dp.message(Command("myself"))
     async def handle_myself(message: Message):
-        await message.answer("MYSELF OK")
+        user_id = message.from_user.id
+
+        total_likes = await likes_service.get_user_total_likes(user_id)
+        top_tracks = await likes_service.get_user_top_tracks(user_id, limit=5)
+        top_artists = await likes_service.get_user_top_artists(user_id, limit=5)
+
+        if not top_tracks and not top_artists and total_likes == 0:
+            await message.answer(
+                "♫ Seu perfil\n\n"
+                "Nenhum dado disponível ainda."
+            )
+            return
+
+        tracks_lines = ["♫ Músicas"]
+        for index, (track_name, plays) in enumerate(top_tracks, start=1):
+            tracks_lines.append(f"{index}. {track_name} — {plays}")
+
+        artists_lines = ["★ Artistas"]
+        for index, (artist_name, plays) in enumerate(top_artists, start=1):
+            artists_lines.append(f"{index}. {artist_name} — {plays}")
+
+        text = (
+            "♫ Seu perfil\n\n"
+            f"{'\n'.join(tracks_lines)}\n\n"
+            f"{'\n'.join(artists_lines)}\n\n"
+            f"♥ Curtidas — {total_likes}"
+        )
+        await message.answer(text)
 
     @dp.message(Command("songcharts"))
     async def handle_songcharts(message: Message):
