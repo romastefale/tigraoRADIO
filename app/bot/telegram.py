@@ -12,6 +12,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command
 from aiogram.types import (
     Message,
+    CallbackQuery,
     InlineQuery,
     InlineQueryResultPhoto,
     InlineKeyboardMarkup,
@@ -93,6 +94,22 @@ def _play_caption(
 
 
 def _register_handlers(dp: Dispatcher) -> None:
+    @dp.callback_query(F.data.startswith("plays:"))
+    async def plays_callback(callback: CallbackQuery) -> None:
+        data = callback.data or ""
+        track_id = data.split(":", 1)[1] if ":" in data else ""
+        user_id = callback.from_user.id if callback.from_user else 0
+
+        if not track_id or not user_id:
+            await callback.answer("Não foi possível carregar suas reproduções.", show_alert=True)
+            return
+
+        db = _new_session()
+        try:
+            user_plays = await likes_service.get_user_play_count(db, user_id, track_id)
+            await callback.answer(f"🎶 Você já ouviu {user_plays} vezes", show_alert=True)
+        finally:
+            db.close()
 
     # ========================
     # INLINE MODE
@@ -219,7 +236,7 @@ def _register_handlers(dp: Dispatcher) -> None:
                     [
                         InlineKeyboardButton(
                             text=f"🎵 {total_plays} · ♡ {total_likes}",
-                            callback_data="playing_stats",
+                            callback_data=f"plays:{track_id}",
                         )
                     ]
                 ]
