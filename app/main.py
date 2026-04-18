@@ -13,6 +13,7 @@ from aiogram import Bot
 from app.bot.telegram import shutdown_telegram_bot, startup_telegram_bot, bot_dispatcher
 from app.config.settings import TELEGRAM_BOT_TOKEN
 from app.db.database import SessionLocal, init_db
+from app.likes import likes_service
 from app.services.spotify import spotify_service
 
 
@@ -34,6 +35,7 @@ def _log_background_task_result(task: asyncio.Task[None], task_name: str) -> Non
 @app.on_event("startup")
 async def on_startup() -> None:
     init_db()
+    likes_service.initialize()
 
     telegram_startup_task = asyncio.create_task(startup_telegram_bot())
     telegram_startup_task.add_done_callback(
