@@ -13,6 +13,11 @@ class LikesService:
     def _new_session(self) -> Session:
         return SessionLocal()
 
+    def _table_has_column(self, db: Session, table_name: str, column_name: str) -> bool:
+        stmt = text(f"PRAGMA table_info({table_name})")
+        rows = db.execute(stmt).all()
+        return any(str(row[1]) == column_name for row in rows)
+
     async def register_play(self, user_id: int, track_id: str) -> None:
         with self._new_session() as db:
             db.add(TrackPlay(user_id=user_id, track_id=track_id))
@@ -48,106 +53,105 @@ class LikesService:
             return int(result)
 
     async def get_user_total_likes(self, user_id: int) -> int:
-        print("SERVICE HIT")
         with self._new_session() as db:
             stmt = select(func.count(TrackLike.id)).where(TrackLike.user_id == user_id)
             result = db.execute(stmt).scalar_one()
-            print("DATA:", result)
             return int(result)
 
     async def get_user_top_tracks(self, user_id: int, limit: int = 5) -> list[tuple[str, int]]:
-        print("SERVICE HIT")
         with self._new_session() as db:
+            has_track_name = self._table_has_column(db, "track_plays", "track_name")
+            track_label = "COALESCE(track_name, track_id)" if has_track_name else "track_id"
             stmt = text(
-                """
-                SELECT track_name, plays
-                FROM user_play_counts
+                f"""
+                SELECT {track_label} AS track_label, COUNT(*) AS plays
+                FROM track_plays
                 WHERE user_id = :user_id
-                ORDER BY plays DESC
+                GROUP BY track_id, track_label
+                ORDER BY plays DESC, track_label ASC
                 LIMIT :limit
                 """
             )
             rows = db.execute(stmt, {"user_id": user_id, "limit": limit}).all()
-            print("DATA:", rows)
             return [(str(row[0]), int(row[1])) for row in rows]
 
     async def get_user_top_artists(self, user_id: int, limit: int = 5) -> list[tuple[str, int]]:
-        print("SERVICE HIT")
         with self._new_session() as db:
+            if not self._table_has_column(db, "track_plays", "artist_name"):
+                return []
             stmt = text(
                 """
-                SELECT artist_name, SUM(plays) AS total_plays
-                FROM user_play_counts
+                SELECT artist_name, COUNT(*) AS total_plays
+                FROM track_plays
                 WHERE user_id = :user_id
                 GROUP BY artist_name
-                ORDER BY total_plays DESC
+                ORDER BY total_plays DESC, artist_name ASC
                 LIMIT :limit
                 """
             )
             rows = db.execute(stmt, {"user_id": user_id, "limit": limit}).all()
-            print("DATA:", rows)
             return [(str(row[0]), int(row[1])) for row in rows]
 
     async def get_group_top_tracks(self, limit: int = 5) -> list[tuple[str, int]]:
-        print("SERVICE HIT")
         with self._new_session() as db:
+            has_track_name = self._table_has_column(db, "track_plays", "track_name")
+            track_label = "COALESCE(track_name, track_id)" if has_track_name else "track_id"
             stmt = text(
-                """
-                SELECT track_name, SUM(plays) AS total_plays
-                FROM user_play_counts
-                GROUP BY track_name
-                ORDER BY total_plays DESC
+                f"""
+                SELECT {track_label} AS track_label, COUNT(*) AS total_plays
+                FROM track_plays
+                GROUP BY track_id, track_label
+                ORDER BY total_plays DESC, track_label ASC
                 LIMIT :limit
                 """
             )
             rows = db.execute(stmt, {"limit": limit}).all()
-            print("DATA:", rows)
             return [(str(row[0]), int(row[1])) for row in rows]
 
     async def get_top_tracks(self, limit: int = 5) -> list[tuple[str, int]]:
         return await self.get_group_top_tracks(limit=limit)
 
     async def get_group_top_artists(self, limit: int = 5) -> list[tuple[str, int]]:
-        print("SERVICE HIT")
         with self._new_session() as db:
+            if not self._table_has_column(db, "track_plays", "artist_name"):
+                return []
             stmt = text(
                 """
-                SELECT artist_name, SUM(plays) AS total_plays
-                FROM user_play_counts
+                SELECT artist_name, COUNT(*) AS total_plays
+                FROM track_plays
                 GROUP BY artist_name
-                ORDER BY total_plays DESC
+                ORDER BY total_plays DESC, artist_name ASC
                 LIMIT :limit
                 """
             )
             rows = db.execute(stmt, {"limit": limit}).all()
-            print("DATA:", rows)
             return [(str(row[0]), int(row[1])) for row in rows]
 
     async def get_top_artists(self, limit: int = 5) -> list[tuple[str, int]]:
         return await self.get_group_top_artists(limit=limit)
 
     async def get_group_most_liked_tracks(self, limit: int = 5) -> list[tuple[str, int]]:
-        print("SERVICE HIT")
         with self._new_session() as db:
+            has_track_name = self._table_has_column(db, "track_plays", "track_name")
+            has_liked_flag = self._table_has_column(db, "track_likes", "liked")
+            liked_filter = "WHERE liked = 1" if has_liked_flag else ""
+            track_label = "COALESCE(MAX(tp.track_name), likes.track_id)" if has_track_name else "likes.track_id"
             stmt = text(
-                """
-                SELECT upc.track_name, likes.total_likes
+                f"""
+                SELECT {track_label} AS track_label, likes.total_likes
                 FROM (
                     SELECT track_id, COUNT(*) AS total_likes
                     FROM track_likes
+                    {liked_filter}
                     GROUP BY track_id
                 ) AS likes
-                JOIN (
-                    SELECT track_id, MAX(track_name) AS track_name
-                    FROM user_play_counts
-                    GROUP BY track_id
-                ) AS upc ON upc.track_id = likes.track_id
-                ORDER BY likes.total_likes DESC
+                LEFT JOIN track_plays tp ON tp.track_id = likes.track_id
+                GROUP BY likes.track_id, likes.total_likes
+                ORDER BY likes.total_likes DESC, track_label ASC
                 LIMIT :limit
                 """
             )
             rows = db.execute(stmt, {"limit": limit}).all()
-            print("DATA:", rows)
             return [(str(row[0]), int(row[1])) for row in rows]
 
     async def get_most_liked_tracks(self, limit: int = 5) -> list[tuple[str, int]]:
