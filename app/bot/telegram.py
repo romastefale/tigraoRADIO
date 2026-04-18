@@ -10,13 +10,20 @@ from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command
-from aiogram.types import Message, InlineQuery, InlineQueryResultPhoto
+from aiogram.types import (
+    Message,
+    InlineQuery,
+    InlineQueryResultPhoto,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+)
 from sqlalchemy.orm import Session
 
 from app.bot.intent import detect_intent
 from app.config.settings import TELEGRAM_BOT_TOKEN
 from app.core.runtime import allow
 from app.db.database import SessionLocal
+from app.services.likes import likes_service
 from app.services.spotify import spotify_service
 
 logger = logging.getLogger(__name__)
@@ -204,6 +211,69 @@ def _register_handlers(dp: Dispatcher) -> None:
                 return
 
             await message.answer(caption, parse_mode="HTML")
+
+        except Exception as exc:
+            await _handle_spotify_error(message, exc)
+        finally:
+            db.close()
+
+    @dp.message(Command("playing"))
+    async def playing(message: Message) -> None:
+        user_id = message.from_user.id if message.from_user else 0
+        db = _new_session()
+        try:
+            track = await spotify_service.get_current_or_last_played(db, user_id)
+            if not track:
+                await message.answer("Nada está tocando agora.")
+                return
+
+            track_id = track.get("track_id")
+            if not isinstance(track_id, str) or not track_id:
+                await message.answer("Não foi possível identificar a música atual.")
+                return
+
+            await likes_service.register_play(db, user_id, track_id)
+
+            total_plays = await likes_service.get_track_play_count(db, track_id)
+            user_plays = await likes_service.get_user_play_count(db, user_id, track_id)
+            liked = await likes_service.is_track_liked(db, user_id, track_id)
+            total_likes = await likes_service.get_track_like_count(db, track_id)
+
+            username = _telegram_identity(message)
+            track_url = str(track.get("spotify_url") or "")
+            track_name = str(track.get("track_name") or "")
+            artist = str(track.get("artist") or "")
+
+            caption = (
+                f"🎹 {html.escape(username)} está ouvindo…\n\n"
+                f"🎧 <b><a href=\"{html.escape(track_url)}\">{html.escape(track_name)}</a></b> "
+                f"— <i>{html.escape(artist)}</i>\n\n"
+                f"Você já tocou esta faixa {user_plays} vez(es)."
+            )
+
+            like_icon = "♥" if liked else "♡"
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text=f"🎵 {total_plays} · {like_icon} {total_likes}",
+                            callback_data="playing_stats",
+                        )
+                    ]
+                ]
+            )
+
+            album_image_url = track.get("album_image_url")
+            if album_image_url:
+                await message.answer_photo(
+                    photo=str(album_image_url),
+                    caption=caption,
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+                return
+
+            await message.answer(caption, parse_mode="HTML", reply_markup=keyboard)
 
         except Exception as exc:
             await _handle_spotify_error(message, exc)

@@ -147,6 +147,7 @@ class SpotifyService:
                 "track_name": "Faça /login para conectar seu Spotify",
                 "artist": "Spotify",
                 "album": "",
+                "track_id": None,
                 "spotify_url": None,
                 "album_image_url": None,
             }
@@ -186,6 +187,7 @@ class SpotifyService:
                     "track_name": item["name"],
                     "artist": item["artists"][0]["name"],
                     "album": item["album"]["name"],
+                    "track_id": item.get("id"),
                     "spotify_url": item["external_urls"]["spotify"],
                     "album_image_url": item["album"]["images"][0]["url"],
                 }
@@ -207,6 +209,7 @@ class SpotifyService:
                 "track_name": "Erro ao acessar Spotify",
                 "artist": "Spotify",
                 "album": "",
+                "track_id": None,
                 "spotify_url": None,
                 "album_image_url": None,
             }
@@ -221,6 +224,7 @@ class SpotifyService:
                 "track_name": "Nada encontrado",
                 "artist": "Spotify",
                 "album": "",
+                "track_id": None,
                 "spotify_url": None,
                 "album_image_url": None,
             }
@@ -233,6 +237,7 @@ class SpotifyService:
             "track_name": track["name"],
             "artist": track["artists"][0]["name"],
             "album": track["album"]["name"],
+            "track_id": track.get("id"),
             "spotify_url": track["external_urls"]["spotify"],
             "album_image_url": track["album"]["images"][0]["url"],
         }
