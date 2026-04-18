@@ -254,8 +254,10 @@ def _register_handlers(dp: Dispatcher) -> None:
 
     @dp.message(Command("myself"))
     async def handle_myself(message: Message):
+        print("MYSELF HANDLER HIT")
         user_id = message.from_user.id
 
+        print("CALLING SERVICE")
         total_likes = await likes_service.get_user_total_likes(user_id)
         top_tracks = await likes_service.get_user_top_tracks(user_id, limit=5)
         top_artists = await likes_service.get_user_top_artists(user_id, limit=5)
@@ -283,10 +285,13 @@ def _register_handlers(dp: Dispatcher) -> None:
             f"{artists_block}\n\n"
             f"♥ Curtidas — {total_likes}"
         )
+        print("SENDING RESPONSE")
         await message.answer(text)
 
     @dp.message(Command("songcharts"))
     async def handle_songcharts(message: Message):
+        print("SONGCHARTS HANDLER HIT")
+        print("CALLING SERVICE")
         top_tracks = await likes_service.get_top_tracks(limit=5)
         top_artists = await likes_service.get_top_artists(limit=5)
         most_liked_tracks = await likes_service.get_most_liked_tracks(limit=5)
@@ -319,6 +324,7 @@ def _register_handlers(dp: Dispatcher) -> None:
             f"{artists_block}\n\n"
             f"{liked_block}"
         )
+        print("SENDING RESPONSE")
         await message.answer(text)
 
     @dp.message(Command("logout"))

@@ -101,8 +101,10 @@ async def spotify_track(
 # 🔥 CORREÇÃO: ROTA DO WEBHOOK (ESSENCIAL)
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
+    print("WEBHOOK HIT")
     if bot is None or bot_dispatcher is None:
         return {"ok": False, "message": "Telegram bot is not configured"}
     update = await request.json()
+    print("DISPATCHING UPDATE")
     await bot_dispatcher.feed_update(bot, update)
     return {"ok": True}
