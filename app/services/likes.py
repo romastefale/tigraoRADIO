@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -52,6 +52,35 @@ class LikesService:
             stmt = select(func.count(TrackLike.id)).where(TrackLike.user_id == user_id)
             result = db.execute(stmt).scalar_one()
             return int(result)
+
+    async def get_user_top_tracks(self, user_id: int, limit: int = 5) -> list[tuple[str, int]]:
+        with self._new_session() as db:
+            stmt = text(
+                """
+                SELECT track_name, plays
+                FROM user_play_counts
+                WHERE user_id = :user_id
+                ORDER BY plays DESC
+                LIMIT :limit
+                """
+            )
+            rows = db.execute(stmt, {"user_id": user_id, "limit": limit}).all()
+            return [(str(row[0]), int(row[1])) for row in rows]
+
+    async def get_user_top_artists(self, user_id: int, limit: int = 5) -> list[tuple[str, int]]:
+        with self._new_session() as db:
+            stmt = text(
+                """
+                SELECT artist_name, SUM(plays) AS total_plays
+                FROM user_play_counts
+                WHERE user_id = :user_id
+                GROUP BY artist_name
+                ORDER BY total_plays DESC
+                LIMIT :limit
+                """
+            )
+            rows = db.execute(stmt, {"user_id": user_id, "limit": limit}).all()
+            return [(str(row[0]), int(row[1])) for row in rows]
 
     async def toggle_track_like(self, user_id: int, track_id: str) -> bool:
         with self._new_session() as db:
