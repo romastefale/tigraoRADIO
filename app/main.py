@@ -17,7 +17,7 @@ from app.services.spotify import spotify_service
 app = FastAPI(title="Minimal Backend")
 logger = logging.getLogger(__name__)
 
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
+bot: Bot | None = None
 
 
 def _log_background_task_result(task: asyncio.Task[None], task_name: str) -> None:
@@ -31,7 +31,10 @@ def _log_background_task_result(task: asyncio.Task[None], task_name: str) -> Non
 
 @app.on_event("startup")
 async def on_startup() -> None:
+    global bot
     init_db()
+    if TELEGRAM_BOT_TOKEN:
+        bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
     telegram_startup_task = asyncio.create_task(startup_telegram_bot())
     telegram_startup_task.add_done_callback(
@@ -98,6 +101,8 @@ async def spotify_track(
 # 🔥 CORREÇÃO: ROTA DO WEBHOOK (ESSENCIAL)
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
+    if bot is None or bot_dispatcher is None:
+        return {"ok": False, "message": "Telegram bot is not configured"}
     update = await request.json()
     await bot_dispatcher.feed_update(bot, update)
     return {"ok": True}
