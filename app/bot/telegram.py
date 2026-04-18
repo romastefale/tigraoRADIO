@@ -251,6 +251,15 @@ def _register_handlers(dp: Dispatcher) -> None:
         except Exception as exc:
             await _handle_spotify_error(message, exc)
 
+
+    @dp.message(Command("myself"))
+    async def handle_myself(message: Message):
+        await message.answer("MYSELF OK")
+
+    @dp.message(Command("songcharts"))
+    async def handle_songcharts(message: Message):
+        await message.answer("SONGCHARTS OK")
+
     @dp.message(Command("logout"))
     async def logout(message: Message) -> None:
         user_id = message.from_user.id if message.from_user else 0
@@ -263,7 +272,7 @@ def _register_handlers(dp: Dispatcher) -> None:
         except Exception as exc:
             await _handle_spotify_error(message, exc)
 
-    @dp.message(F.text)
+    @dp.message(F.text & ~F.text.startswith("/"))
     async def natural_handler(message: Message) -> None:
         if not message.text or not message.from_user:
             return
