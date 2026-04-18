@@ -53,6 +53,8 @@ def init_db() -> None:
     """Create tables safely without crashing the app."""
     try:
         from app.models.spotify_token import SpotifyToken  # noqa: F401
+        from app.models.track_like import TrackLike  # noqa: F401
+        from app.models.track_play import TrackPlay  # noqa: F401
 
         Base.metadata.create_all(bind=engine)
         logger.info("Database initialized.")
