@@ -247,7 +247,8 @@ def _register_handlers(dp: Dispatcher) -> None:
             await message.answer_photo(
                 photo=BufferedInputFile(image_bytes, filename="playimg.png")
             )
-        except Exception:
+        except Exception as e:
+            await message.answer(str(e))
             await play(message)
         finally:
             db.close()
