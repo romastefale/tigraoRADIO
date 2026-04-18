@@ -2,17 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Generator
 
-from fastapi import Depends, FastAPI, Query, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import RedirectResponse
-from sqlalchemy.orm import Session
 
 from aiogram import Bot
 
 from app.bot.telegram import shutdown_telegram_bot, startup_telegram_bot, bot_dispatcher
 from app.config.settings import TELEGRAM_BOT_TOKEN
-from app.db.database import SessionLocal, init_db
+from app.db.database import init_db
 from app.services.spotify import spotify_service
 
 
@@ -47,14 +45,6 @@ async def on_shutdown() -> None:
     await spotify_service.shutdown()
 
 
-def get_db() -> Generator[Session, None, None]:
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 @app.get("/healthz", status_code=200)
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
@@ -69,7 +59,6 @@ def spotify_login(user_id: int = Query(...)) -> RedirectResponse:
 async def spotify_callback(
     code: str,
     state: str,
-    db: Session = Depends(get_db),
 ) -> dict[str, str]:
 
     logger.error("CALLBACK RECEIVED")
@@ -87,14 +76,11 @@ async def spotify_callback(
         }
 
     try:
-        await spotify_service.exchange_code_for_token(db, code, user_id)
+        await spotify_service.exchange_code_for_token(code, user_id)
         logger.error("TOKEN FLOW COMPLETED")
     except Exception as e:
         logger.error("TOKEN FLOW FAILED: %s", e)
-        return {
-            "status": "error",
-            "message": "Erro ao conectar com Spotify",
-        }
+        raise
 
     return {
         "status": "ok",
@@ -105,9 +91,8 @@ async def spotify_callback(
 @app.get("/spotify/track")
 async def spotify_track(
     user_id: int,
-    db: Session = Depends(get_db),
 ) -> dict[str, str | None] | None:
-    return await spotify_service.get_current_or_last_played(db, user_id)
+    return await spotify_service.get_current_or_last_played(user_id)
 
 
 # 🔥 CORREÇÃO: ROTA DO WEBHOOK (ESSENCIAL)

@@ -14,6 +14,7 @@ from app.config.settings import (
     SPOTIFY_SCOPES,
     SPOTIFY_REDIRECT_URI,
 )
+from app.db.database import SessionLocal
 
 from app.models.spotify_token import SpotifyToken
 
@@ -43,10 +44,10 @@ class SpotifyService:
     def resolve_user_id_from_state(self, state: str) -> int | None:
         try:
             return int(state)
-        except Exception:
+        except ValueError:
             return None
 
-    async def exchange_code_for_token(self, db, code: str, user_id: int) -> None:
+    async def exchange_code_for_token(self, code: str, user_id: int) -> None:
         auth_str = f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}"
         b64_auth = base64.b64encode(auth_str.encode()).decode()
 
@@ -76,69 +77,72 @@ class SpotifyService:
 
         expiration = datetime.utcnow() + timedelta(seconds=expires_in)
 
-        existing = db.query(SpotifyToken).filter_by(user_id=user_id).first()
+        with SessionLocal() as db:
+            existing = db.query(SpotifyToken).filter_by(user_id=user_id).first()
 
-        if existing:
-            existing.access_token = access_token
-            existing.expiration = expiration
+            if existing:
+                existing.access_token = access_token
+                existing.expiration = expiration
 
-            # 🔥 NÃO perder refresh_token antigo
-            if refresh_token:
-                existing.refresh_token = refresh_token
-        else:
-            db.add(
-                SpotifyToken(
-                    user_id=user_id,
-                    access_token=access_token,
-                    refresh_token=refresh_token or "",
-                    expiration=expiration,
+                # 🔥 NÃO perder refresh_token antigo
+                if refresh_token:
+                    existing.refresh_token = refresh_token
+            else:
+                db.add(
+                    SpotifyToken(
+                        user_id=user_id,
+                        access_token=access_token,
+                        refresh_token=refresh_token or "",
+                        expiration=expiration,
+                    )
                 )
-            )
+            db.commit()
 
-        db.commit()
+    async def _refresh_token(self, user_id: int) -> SpotifyToken | None:
+        with SessionLocal() as db:
+            token = db.query(SpotifyToken).filter_by(user_id=user_id).first()
+            if not token:
+                return None
+            if not token.refresh_token:
+                logger.error("Missing refresh token for user_id=%s", token.user_id)
+                return None
 
-    async def _refresh_token(self, db, token: SpotifyToken) -> SpotifyToken | None:
-        if not token.refresh_token:
-            logger.error("Missing refresh token for user_id=%s", token.user_id)
-            return None
+            auth_str = f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}"
+            b64_auth = base64.b64encode(auth_str.encode()).decode()
 
-        auth_str = f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}"
-        b64_auth = base64.b64encode(auth_str.encode()).decode()
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    "https://accounts.spotify.com/api/token",
+                    data={
+                        "grant_type": "refresh_token",
+                        "refresh_token": token.refresh_token,
+                    },
+                    headers={
+                        "Authorization": f"Basic {b64_auth}",
+                        "Content-Type": "application/x-www-form-urlencoded",
+                    },
+                )
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://accounts.spotify.com/api/token",
-                data={
-                    "grant_type": "refresh_token",
-                    "refresh_token": token.refresh_token,
-                },
-                headers={
-                    "Authorization": f"Basic {b64_auth}",
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-            )
+            data = response.json()
 
-        data = response.json()
+            access_token = data.get("access_token")
+            expires_in = data.get("expires_in")
 
-        access_token = data.get("access_token")
-        expires_in = data.get("expires_in")
+            if not access_token or not expires_in:
+                logger.error("Refresh failed: %s", data)
+                return None
 
-        if not access_token or not expires_in:
-            logger.error("Refresh failed: %s", data)
-            return None
+            token.access_token = access_token
+            token.expiration = datetime.utcnow() + timedelta(seconds=expires_in)
+            db.commit()
+            db.refresh(token)
 
-        token.access_token = access_token
-        token.expiration = datetime.utcnow() + timedelta(seconds=expires_in)
+            return token
 
-        db.commit()
+    async def get_current_or_last_played(self, user_id: int) -> dict[str, Any] | None:
 
-        return token
-
-    async def get_current_or_last_played(
-        self, db, user_id: int
-    ) -> dict[str, Any] | None:
-
-        token = db.query(SpotifyToken).filter_by(user_id=user_id).first()
+        with SessionLocal() as db:
+            token = db.query(SpotifyToken).filter_by(user_id=user_id).first()
 
         if not token:
             return {
@@ -171,10 +175,9 @@ class SpotifyService:
 
         # 🔥 se token inválido → refresh e tenta de novo
         if response.status_code == 401:
-            refreshed = await self._refresh_token(db, token)
+            refreshed = await self._refresh_token(user_id)
             if refreshed:
                 response = await fetch_current(refreshed.access_token)
-                token = refreshed
 
         if response.status_code == 200:
             data = response.json()
@@ -197,7 +200,7 @@ class SpotifyService:
 
         # 🔥 novamente tratar 401
         if recent.status_code == 401:
-            refreshed = await self._refresh_token(db, token)
+            refreshed = await self._refresh_token(user_id)
             if refreshed:
                 recent = await fetch_recent(refreshed.access_token)
 
@@ -242,12 +245,12 @@ class SpotifyService:
             "album_image_url": track["album"]["images"][0]["url"],
         }
 
-    async def clear_user_session(self, db, user_id: int) -> bool:
-        token = db.query(SpotifyToken).filter_by(user_id=user_id).first()
-
-        if token:
-            db.delete(token)
-            db.commit()
+    async def clear_user_session(self, user_id: int) -> bool:
+        with SessionLocal() as db:
+            token = db.query(SpotifyToken).filter_by(user_id=user_id).first()
+            if token:
+                db.delete(token)
+                db.commit()
 
         return True
 
