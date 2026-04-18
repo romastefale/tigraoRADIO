@@ -287,9 +287,9 @@ def _register_handlers(dp: Dispatcher) -> None:
 
     @dp.message(Command("songcharts"))
     async def handle_songcharts(message: Message):
-        top_tracks = await likes_service.get_group_top_tracks(limit=5)
-        top_artists = await likes_service.get_group_top_artists(limit=5)
-        most_liked_tracks = await likes_service.get_group_most_liked_tracks(limit=5)
+        top_tracks = await likes_service.get_top_tracks(limit=5)
+        top_artists = await likes_service.get_top_artists(limit=5)
+        most_liked_tracks = await likes_service.get_most_liked_tracks(limit=5)
 
         if not top_tracks and not top_artists and not most_liked_tracks:
             await message.answer(
