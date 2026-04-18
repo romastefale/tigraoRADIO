@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
     Message,
     CallbackQuery,
@@ -211,7 +212,7 @@ def _register_handlers(dp: Dispatcher) -> None:
 
             track_id = track.get("track_id")
             if not isinstance(track_id, str) or not track_id:
-                await message.answer("Não foi possível identificar a música atual.")
+                await message.answer("Erro ao identificar a música.")
                 return
 
             track_url = str(track.get("spotify_url") or "")
@@ -220,6 +221,9 @@ def _register_handlers(dp: Dispatcher) -> None:
             total_plays = await likes_service.get_track_play_count(track_id)
             total_likes = await likes_service.get_total_likes(track_id)
             user_total_likes = await likes_service.get_user_total_likes(user_id)
+            total_plays = total_plays or 0
+            total_likes = total_likes or 0
+            user_total_likes = user_total_likes or 0
             liked = await likes_service.is_track_liked(user_id, track_id)
 
             display_name = message.from_user.full_name if message.from_user else "Unknown"
@@ -296,7 +300,16 @@ def _register_handlers(dp: Dispatcher) -> None:
 
     @dp.callback_query(lambda c: c.data and c.data.startswith("plays:"))
     async def playing_stats(callback: CallbackQuery) -> None:
-        track_id = callback.data.split(":")[1]
+        if not callback.data or ":" not in callback.data:
+            await callback.answer()
+            return
+
+        parts = callback.data.split(":", 1)
+        if len(parts) < 2:
+            await callback.answer()
+            return
+
+        track_id = parts[1]
         user_id = callback.from_user.id
         user_plays = await likes_service.get_user_play_count(user_id, track_id)
         vez = "vez" if user_plays == 1 else "vezes"
@@ -305,24 +318,33 @@ def _register_handlers(dp: Dispatcher) -> None:
                 f"♫ Você já ouviu {user_plays} {vez}",
                 show_alert=True
             )
-        except:
+        except TelegramBadRequest:
             pass
 
     @dp.callback_query(lambda c: c.data and c.data.startswith("like:"))
     async def like_track(callback: CallbackQuery) -> None:
         await callback.answer()
 
-        track_id = callback.data.split(":")[1]
+        if not callback.data or ":" not in callback.data:
+            return
+
+        parts = callback.data.split(":", 1)
+        if len(parts) < 2:
+            return
+
+        track_id = parts[1]
         user_id = callback.from_user.id
 
         liked = await likes_service.toggle_track_like(user_id, track_id)
         total_likes = await likes_service.get_total_likes(track_id)
         total_plays = await likes_service.get_track_play_count(track_id)
+        total_plays = total_plays or 0
+        total_likes = total_likes or 0
 
         keyboard = _playing_keyboard(track_id, total_plays, total_likes, liked)
         try:
             await callback.message.edit_reply_markup(reply_markup=keyboard)
-        except:
+        except TelegramBadRequest:
             pass
 
 
