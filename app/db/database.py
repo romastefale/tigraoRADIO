@@ -16,10 +16,10 @@ logger = logging.getLogger(__name__)
 # ========================
 
 try:
-    os.makedirs("/data", exist_ok=True)
-    logger.info("Database directory /data ready.")
+    os.makedirs("./data", exist_ok=True)
+    logger.info("Database directory ./data ready.")
 except Exception as exc:  # noqa: BLE001
-    logger.warning("Could not prepare /data: %s", exc)
+    logger.warning("Could not prepare ./data: %s", exc)
 
 
 # ========================

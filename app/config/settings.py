@@ -46,13 +46,13 @@ SPOTIFY_CIRCUIT_BREAKER_COOLDOWN_SECONDS = float(
 )
 
 # ========================
-# DATABASE (FIXED SQLITE + VOLUME)
+# DATABASE (DEFAULT SQLITE FOR LOCAL/RAILWAY)
 # ========================
 
-DATA_DIR = Path("/data")
+DATA_DIR = Path("./data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
 if not DATABASE_URL:
-    DATABASE_URL = f"sqlite:///{DATA_DIR / 'app.db'}"
+    DATABASE_URL = "sqlite:///./data/app.db"
