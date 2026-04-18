@@ -17,7 +17,7 @@ from app.bot.playback import playback_router
 from app.config.settings import BASE_URL, TELEGRAM_BOT_TOKEN
 from app.core.runtime import allow
 from app.db.database import SessionLocal
-from app.render.renderer import render_image
+from app.render.pillow_renderer import render_image
 from app.services.spotify import spotify_service
 
 logger = logging.getLogger(__name__)
