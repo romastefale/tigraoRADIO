@@ -12,6 +12,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command
 from aiogram.types import (
     Message,
+    CallbackQuery,
     InlineQuery,
     InlineQueryResultPhoto,
     InlineKeyboardMarkup,
@@ -89,6 +90,24 @@ def _play_caption(
         f"{status_line}\n"
         f"🎧 {track_text} - "
         f"<i>{html.escape(artist)}</i>"
+    )
+
+
+def _playing_keyboard(track_id: str, total_plays: int, total_likes: int, liked: bool) -> InlineKeyboardMarkup:
+    like_icon = "♥" if liked else "♡"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"🎵 {total_plays}",
+                    callback_data=f"plays:{track_id}",
+                ),
+                InlineKeyboardButton(
+                    text=f"{like_icon} {total_likes}",
+                    callback_data=f"like:{track_id}",
+                ),
+            ]
+        ]
     )
 
 
@@ -198,10 +217,12 @@ def _register_handlers(dp: Dispatcher) -> None:
                 return
 
             track_url = str(track.get("spotify_url") or "")
-            await likes_service.register_play(db, user_id, track_id)
+            await likes_service.register_play(user_id, track_id)
 
-            total_plays = await likes_service.get_track_play_count(db, track_id)
-            total_likes = await likes_service.get_track_like_count(db, track_id)
+            total_plays = await likes_service.get_track_play_count(track_id)
+            total_likes = await likes_service.get_total_likes(track_id)
+            user_total_likes = await likes_service.get_user_total_likes(user_id)
+            liked = await likes_service.is_track_liked(user_id, track_id)
 
             username = _telegram_identity(message)
             user_link = f"tg://user?id={user_id}"
@@ -209,21 +230,12 @@ def _register_handlers(dp: Dispatcher) -> None:
             artist = str(track.get("artist") or "")
 
             caption = (
-                f"🎹 <b><a href=\"{html.escape(user_link)}\">{html.escape(username)}</a></b> está ouvindo…\n\n"
+                f"🎹 <b><a href=\"{html.escape(user_link)}\">{html.escape(username)}</a></b> está ouvindo… · <i>♥ {user_total_likes}</i>\n\n"
                 f"🎧 <b><a href=\"{html.escape(track_url)}\">{html.escape(track_name)}</a></b> "
                 f"— <i>{html.escape(artist)}</i>"
             )
 
-            keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text=f"🎵 {total_plays} · ♡ {total_likes}",
-                            callback_data="playing_stats",
-                        )
-                    ]
-                ]
-            )
+            keyboard = _playing_keyboard(track_id, total_plays, total_likes, liked)
 
             album_image_url = track.get("album_image_url")
             if album_image_url:
@@ -276,6 +288,41 @@ def _register_handlers(dp: Dispatcher) -> None:
         intent = detect_intent(message.text)
         if intent == "play":
             await play(message)
+
+    @dp.callback_query(F.data.startswith("plays:"))
+    async def playing_stats(callback: CallbackQuery) -> None:
+        if not callback.data:
+            await callback.answer()
+            return
+
+        user_id = callback.from_user.id
+        track_id = callback.data.split(":", 1)[1]
+        user_plays = await likes_service.get_user_play_count(user_id, track_id)
+        play_word = "vez" if user_plays == 1 else "vezes"
+        await callback.answer(
+            f"🎶 Você já ouviu {user_plays} {play_word}",
+            show_alert=True,
+        )
+
+    @dp.callback_query(F.data.startswith("like:"))
+    async def like_track(callback: CallbackQuery) -> None:
+        if not callback.data:
+            await callback.answer()
+            return
+
+        message = callback.message
+        if message is None:
+            await callback.answer()
+            return
+
+        user_id = callback.from_user.id
+        track_id = callback.data.split(":", 1)[1]
+        liked = await likes_service.toggle_track_like(user_id, track_id)
+        total_likes = await likes_service.get_total_likes(track_id)
+        total_plays = await likes_service.get_track_play_count(track_id)
+        keyboard = _playing_keyboard(track_id, total_plays, total_likes, liked)
+        await message.edit_reply_markup(reply_markup=keyboard)
+        await callback.answer()
 
 
 async def startup_telegram_bot() -> None:
