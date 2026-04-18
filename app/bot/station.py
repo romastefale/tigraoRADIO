@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timedelta
 
 from aiogram import Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import Message
 
@@ -69,7 +70,7 @@ async def stop_station():
             chat_id=station_chat_id,
             message_id=station_message_id
         )
-    except:
+    except TelegramBadRequest:
         pass
 
 
@@ -101,7 +102,7 @@ async def station_loop():
                             chat_id=station_chat_id,
                             message_id=station_message_id
                         )
-                    except:
+                    except TelegramBadRequest:
                         pass
 
             await asyncio.sleep(5)

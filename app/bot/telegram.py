@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import (
     Message,
@@ -18,12 +19,9 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
 )
-from sqlalchemy.orm import Session
-
 from app.bot.intent import detect_intent
 from app.config.settings import TELEGRAM_BOT_TOKEN
 from app.core.runtime import allow
-from app.db.database import SessionLocal
 from app.services.likes import likes_service
 from app.services.spotify import spotify_service
 
@@ -33,11 +31,6 @@ bot_dispatcher: Dispatcher | None = None
 bot_polling_task: asyncio.Task[None] | None = None
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 BLOCKED_WORDS = ["palavra1", "palavra2"]
-
-# ========================
-def _new_session() -> Session:
-    return SessionLocal()
-
 
 async def _handle_spotify_error(message: Message, exc: Exception) -> None:
     logger.exception("Telegram command failed", exc_info=exc)
@@ -122,37 +115,31 @@ def _register_handlers(dp: Dispatcher) -> None:
             return
 
         user_id = query.from_user.id
-        db = _new_session()
+        track = await spotify_service.get_current_or_last_played(user_id)
+        if not track:
+            return
 
-        try:
-            track = await spotify_service.get_current_or_last_played(db, user_id)
-            if not track:
-                return
+        status_line = _format_play_status(track, query.from_user.full_name)
+        caption = _play_caption(
+            status_line=status_line,
+            spotify_url=track.get("spotify_url"),
+            track_name=str(track.get("track_name") or ""),
+            artist=str(track.get("artist") or ""),
+        )
 
-            status_line = _format_play_status(track, query.from_user.full_name)
-            caption = _play_caption(
-                status_line=status_line,
-                spotify_url=track.get("spotify_url"),
-                track_name=str(track.get("track_name") or ""),
-                artist=str(track.get("artist") or ""),
-            )
+        album_image_url = track.get("album_image_url")
+        if not album_image_url:
+            return
 
-            album_image_url = track.get("album_image_url")
-            if not album_image_url:
-                return
+        result = InlineQueryResultPhoto(
+            id=str(uuid.uuid4()),
+            photo_url=album_image_url,
+            thumbnail_url=album_image_url,
+            caption=caption,
+            parse_mode="HTML",
+        )
 
-            result = InlineQueryResultPhoto(
-                id=str(uuid.uuid4()),
-                photo_url=album_image_url,
-                thumbnail_url=album_image_url,
-                caption=caption,
-                parse_mode="HTML",
-            )
-
-            await query.answer([result], cache_time=1)
-
-        finally:
-            db.close()
+        await query.answer([result], cache_time=1)
 
     # ========================
     # COMMANDS
@@ -202,17 +189,17 @@ def _register_handlers(dp: Dispatcher) -> None:
     @dp.message(Command("playing"))
     async def play(message: Message) -> None:
         user_id = message.from_user.id if message.from_user else 0
-        db = _new_session()
         try:
-            track = await spotify_service.get_current_or_last_played(db, user_id)
+            track = await spotify_service.get_current_or_last_played(user_id)
             if not track:
                 await message.answer("Nada está tocando agora.")
                 return
 
             track_id = track.get("track_id")
-            if not isinstance(track_id, str) or not track_id:
-                await message.answer("Não foi possível identificar a música atual.")
+            if not track_id:
+                await message.answer("Erro ao identificar a música.")
                 return
+            track_id = str(track_id)
 
             track_url = str(track.get("spotify_url") or "")
             await likes_service.register_play(user_id, track_id)
@@ -256,23 +243,18 @@ def _register_handlers(dp: Dispatcher) -> None:
 
         except Exception as exc:
             await _handle_spotify_error(message, exc)
-        finally:
-            db.close()
 
     @dp.message(Command("logout"))
     async def logout(message: Message) -> None:
         user_id = message.from_user.id if message.from_user else 0
-        db = _new_session()
         try:
-            await spotify_service.clear_user_session(db, user_id)
+            await spotify_service.clear_user_session(user_id)
             await message.answer(
                 "🔌 Desconectado do Spotify.\n"
                 "Use /login para conectar novamente."
             )
         except Exception as exc:
             await _handle_spotify_error(message, exc)
-        finally:
-            db.close()
 
     @dp.message(F.text)
     async def natural_handler(message: Message) -> None:
@@ -296,7 +278,20 @@ def _register_handlers(dp: Dispatcher) -> None:
 
     @dp.callback_query(lambda c: c.data and c.data.startswith("plays:"))
     async def playing_stats(callback: CallbackQuery) -> None:
-        track_id = callback.data.split(":")[1]
+        if not callback.data or ":" not in callback.data:
+            await callback.answer()
+            return
+
+        parts = callback.data.split(":", 1)
+        if len(parts) < 2:
+            await callback.answer()
+            return
+
+        track_id = parts[1]
+        if not track_id:
+            await callback.answer()
+            return
+
         user_id = callback.from_user.id
         user_plays = await likes_service.get_user_play_count(user_id, track_id)
         vez = "vez" if user_plays == 1 else "vezes"
@@ -305,14 +300,27 @@ def _register_handlers(dp: Dispatcher) -> None:
                 f"♫ Você já ouviu {user_plays} {vez}",
                 show_alert=True
             )
-        except:
+        except TelegramBadRequest:
             pass
 
     @dp.callback_query(lambda c: c.data and c.data.startswith("like:"))
     async def like_track(callback: CallbackQuery) -> None:
         await callback.answer()
 
-        track_id = callback.data.split(":")[1]
+        if not callback.data or ":" not in callback.data:
+            await callback.answer()
+            return
+
+        parts = callback.data.split(":", 1)
+        if len(parts) < 2:
+            await callback.answer()
+            return
+
+        track_id = parts[1]
+        if not track_id:
+            await callback.answer()
+            return
+
         user_id = callback.from_user.id
 
         liked = await likes_service.toggle_track_like(user_id, track_id)
@@ -322,7 +330,7 @@ def _register_handlers(dp: Dispatcher) -> None:
         keyboard = _playing_keyboard(track_id, total_plays, total_likes, liked)
         try:
             await callback.message.edit_reply_markup(reply_markup=keyboard)
-        except:
+        except TelegramBadRequest:
             pass
 
 
