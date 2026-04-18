@@ -270,12 +270,15 @@ def _register_handlers(dp: Dispatcher) -> None:
             return
 
         tracks_lines = ["♫ Músicas"]
-        for index, (track_name, plays) in enumerate(top_tracks, start=1):
-            tracks_lines.append(f"{index}. {track_name} — {plays}")
+        for index, (track_id, plays) in enumerate(top_tracks, start=1):
+            track_name = track_id
+            track_label = track_name if track_name else track_id
+            tracks_lines.append(f"♫ {index}. {track_label} — {plays}")
 
         artists_lines = ["★ Artistas"]
         for index, (artist_name, plays) in enumerate(top_artists, start=1):
-            artists_lines.append(f"{index}. {artist_name} — {plays}")
+            artist_label = artist_name if artist_name else "Desconhecido"
+            artists_lines.append(f"★ {index}. {artist_label} — {plays}")
 
         tracks_block = "\n".join(tracks_lines)
         artists_block = "\n".join(artists_lines)
@@ -304,16 +307,21 @@ def _register_handlers(dp: Dispatcher) -> None:
             return
 
         tracks_lines = ["♫ Músicas"]
-        for index, (track_name, plays) in enumerate(top_tracks, start=1):
-            tracks_lines.append(f"{index}. {track_name} — {plays}")
+        for index, (track_id, plays) in enumerate(top_tracks, start=1):
+            track_name = track_id
+            track_label = track_name if track_name else track_id
+            tracks_lines.append(f"♫ {index}. {track_label} — {plays}")
 
         artists_lines = ["★ Artistas"]
         for index, (artist_name, plays) in enumerate(top_artists, start=1):
-            artists_lines.append(f"{index}. {artist_name} — {plays}")
+            artist_label = artist_name if artist_name else "Desconhecido"
+            artists_lines.append(f"★ {index}. {artist_label} — {plays}")
 
         liked_lines = ["♥ Mais curtidas"]
-        for index, (track_name, likes) in enumerate(most_liked_tracks, start=1):
-            liked_lines.append(f"{index}. {track_name} — {likes}")
+        for index, (track_id, likes) in enumerate(most_liked_tracks, start=1):
+            track_name = track_id
+            track_label = track_name if track_name else track_id
+            liked_lines.append(f"♥ {index}. {track_label} — {likes}")
 
         tracks_block = "\n".join(tracks_lines)
         artists_block = "\n".join(artists_lines)
