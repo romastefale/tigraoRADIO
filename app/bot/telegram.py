@@ -95,20 +95,18 @@ def _play_caption(
 
 def _playing_keyboard(track_id: str, total_plays: int, total_likes: int, liked: bool) -> InlineKeyboardMarkup:
     heart = "♥" if liked else "♡"
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=f"🎵 {total_plays}",
-                    callback_data=f"plays:{track_id}",
-                ),
-                InlineKeyboardButton(
-                    text=f"{heart} {total_likes}",
-                    callback_data=f"like:{track_id}",
-                ),
-            ]
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text=f"♫ {total_plays}",
+                callback_data=f"plays:{track_id}"
+            ),
+            InlineKeyboardButton(
+                text=f"{heart} {total_likes}",
+                callback_data=f"like:{track_id}"
+            )
         ]
-    )
+    ])
 
 
 def _register_handlers(dp: Dispatcher) -> None:
@@ -239,8 +237,8 @@ def _register_handlers(dp: Dispatcher) -> None:
             username = html.escape(username)
 
             caption = (
-                f"🎹 <b><a href=\"{html.escape(user_link)}\">{username}</a></b> está ouvindo… · <i>♥ {user_total_likes}</i>\n\n"
-                f"🎧 <b><a href=\"{html.escape(track_url)}\">{track_name}</a></b> — <i>{artist_name}</i>"
+                f"♫ <b><a href=\"{html.escape(user_link)}\">{username}</a></b> está ouvindo… · <i>♥ {user_total_likes}</i>\n\n"
+                f"♬ <b><a href=\"{html.escape(track_url)}\">{track_name}</a></b> — <i>{artist_name}</i>"
             )
 
             keyboard = _playing_keyboard(track_id, total_plays, total_likes, liked)
@@ -297,35 +295,23 @@ def _register_handlers(dp: Dispatcher) -> None:
         if intent == "play":
             await play(message)
 
-    @dp.callback_query(F.data.startswith("plays:"))
+    @dp.callback_query(lambda c: c.data and c.data.startswith("plays:"))
     async def playing_stats(callback: CallbackQuery) -> None:
-        if not callback.data:
-            await callback.answer()
-            return
-
+        track_id = callback.data.split(":")[1]
         user_id = callback.from_user.id
-        track_id = callback.data.split(":", 1)[1]
         user_plays = await likes_service.get_user_play_count(user_id, track_id)
         vez = "vez" if user_plays == 1 else "vezes"
         await callback.answer(
-            f"🎶 Você já ouviu {user_plays} {vez}",
-            show_alert=True,
+            f"♫ Você já ouviu {user_plays} {vez}",
+            show_alert=True
         )
 
-    @dp.callback_query(F.data.startswith("like:"))
+    @dp.callback_query(lambda c: c.data and c.data.startswith("like:"))
     async def like_track(callback: CallbackQuery) -> None:
-        if not callback.data:
-            await callback.answer()
-            return
-
-        message = callback.message
-        if message is None:
-            await callback.answer()
-            return
-
-        user_id = callback.from_user.id
-        track_id = callback.data.split(":", 1)[1]
         await callback.answer()
+
+        track_id = callback.data.split(":")[1]
+        user_id = callback.from_user.id
 
         liked = await likes_service.toggle_track_like(user_id, track_id)
         total_likes = await likes_service.get_total_likes(track_id)
@@ -333,8 +319,8 @@ def _register_handlers(dp: Dispatcher) -> None:
 
         keyboard = _playing_keyboard(track_id, total_plays, total_likes, liked)
         try:
-            await message.edit_reply_markup(reply_markup=keyboard)
-        except Exception:
+            await callback.message.edit_reply_markup(reply_markup=keyboard)
+        except:
             pass
 
 
