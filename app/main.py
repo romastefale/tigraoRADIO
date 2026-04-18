@@ -7,6 +7,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import RedirectResponse
 
 from aiogram import Bot
+from aiogram.types import Update
 
 from app.bot.telegram import shutdown_telegram_bot, startup_telegram_bot, bot_dispatcher
 from app.config.settings import TELEGRAM_BOT_TOKEN
@@ -104,7 +105,8 @@ async def telegram_webhook(request: Request):
     print("WEBHOOK HIT")
     if bot is None or bot_dispatcher is None:
         return {"ok": False, "message": "Telegram bot is not configured"}
-    update = await request.json()
+    data = await request.json()
+    update = Update.model_validate(data)
     print("DISPATCHING UPDATE")
     await bot_dispatcher.feed_update(bot, update)
     return {"ok": True}
