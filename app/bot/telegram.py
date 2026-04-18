@@ -94,7 +94,7 @@ def _play_caption(
 
 
 def _playing_keyboard(track_id: str, total_plays: int, total_likes: int, liked: bool) -> InlineKeyboardMarkup:
-    like_icon = "♥" if liked else "♡"
+    heart = "♥" if liked else "♡"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -103,7 +103,7 @@ def _playing_keyboard(track_id: str, total_plays: int, total_likes: int, liked: 
                     callback_data=f"plays:{track_id}",
                 ),
                 InlineKeyboardButton(
-                    text=f"{like_icon} {total_likes}",
+                    text=f"{heart} {total_likes}",
                     callback_data=f"like:{track_id}",
                 ),
             ]
@@ -225,14 +225,22 @@ def _register_handlers(dp: Dispatcher) -> None:
             liked = await likes_service.is_track_liked(user_id, track_id)
 
             username = _telegram_identity(message)
-            user_link = f"tg://user?id={user_id}"
+            if message.from_user and message.from_user.username:
+                username = f"@{message.from_user.username}"
+                user_link = f"https://t.me/{message.from_user.username}"
+            else:
+                user_link = f"tg://user?id={user_id}"
+
             track_name = str(track.get("track_name") or "")
-            artist = str(track.get("artist") or "")
+            artist_name = str(track.get("artist") or "")
+
+            track_name = html.escape(track_name)
+            artist_name = html.escape(artist_name)
+            username = html.escape(username)
 
             caption = (
-                f"🎹 <b><a href=\"{html.escape(user_link)}\">{html.escape(username)}</a></b> está ouvindo… · <i>♥ {user_total_likes}</i>\n\n"
-                f"🎧 <b><a href=\"{html.escape(track_url)}\">{html.escape(track_name)}</a></b> "
-                f"— <i>{html.escape(artist)}</i>"
+                f"🎹 <b><a href=\"{html.escape(user_link)}\">{username}</a></b> está ouvindo… · <i>♥ {user_total_likes}</i>\n\n"
+                f"🎧 <b><a href=\"{html.escape(track_url)}\">{track_name}</a></b> — <i>{artist_name}</i>"
             )
 
             keyboard = _playing_keyboard(track_id, total_plays, total_likes, liked)
@@ -298,9 +306,9 @@ def _register_handlers(dp: Dispatcher) -> None:
         user_id = callback.from_user.id
         track_id = callback.data.split(":", 1)[1]
         user_plays = await likes_service.get_user_play_count(user_id, track_id)
-        play_word = "vez" if user_plays == 1 else "vezes"
+        vez = "vez" if user_plays == 1 else "vezes"
         await callback.answer(
-            f"🎶 Você já ouviu {user_plays} {play_word}",
+            f"🎶 Você já ouviu {user_plays} {vez}",
             show_alert=True,
         )
 
@@ -317,12 +325,17 @@ def _register_handlers(dp: Dispatcher) -> None:
 
         user_id = callback.from_user.id
         track_id = callback.data.split(":", 1)[1]
+        await callback.answer()
+
         liked = await likes_service.toggle_track_like(user_id, track_id)
         total_likes = await likes_service.get_total_likes(track_id)
         total_plays = await likes_service.get_track_play_count(track_id)
+
         keyboard = _playing_keyboard(track_id, total_plays, total_likes, liked)
-        await message.edit_reply_markup(reply_markup=keyboard)
-        await callback.answer()
+        try:
+            await message.edit_reply_markup(reply_markup=keyboard)
+        except Exception:
+            pass
 
 
 async def startup_telegram_bot() -> None:
