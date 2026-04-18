@@ -82,6 +82,56 @@ class LikesService:
             rows = db.execute(stmt, {"user_id": user_id, "limit": limit}).all()
             return [(str(row[0]), int(row[1])) for row in rows]
 
+    async def get_group_top_tracks(self, limit: int = 5) -> list[tuple[str, int]]:
+        with self._new_session() as db:
+            stmt = text(
+                """
+                SELECT track_name, SUM(plays) AS total_plays
+                FROM user_play_counts
+                GROUP BY track_name
+                ORDER BY total_plays DESC
+                LIMIT :limit
+                """
+            )
+            rows = db.execute(stmt, {"limit": limit}).all()
+            return [(str(row[0]), int(row[1])) for row in rows]
+
+    async def get_group_top_artists(self, limit: int = 5) -> list[tuple[str, int]]:
+        with self._new_session() as db:
+            stmt = text(
+                """
+                SELECT artist_name, SUM(plays) AS total_plays
+                FROM user_play_counts
+                GROUP BY artist_name
+                ORDER BY total_plays DESC
+                LIMIT :limit
+                """
+            )
+            rows = db.execute(stmt, {"limit": limit}).all()
+            return [(str(row[0]), int(row[1])) for row in rows]
+
+    async def get_group_most_liked_tracks(self, limit: int = 5) -> list[tuple[str, int]]:
+        with self._new_session() as db:
+            stmt = text(
+                """
+                SELECT upc.track_name, likes.total_likes
+                FROM (
+                    SELECT track_id, COUNT(*) AS total_likes
+                    FROM track_likes
+                    GROUP BY track_id
+                ) AS likes
+                JOIN (
+                    SELECT track_id, MAX(track_name) AS track_name
+                    FROM user_play_counts
+                    GROUP BY track_id
+                ) AS upc ON upc.track_id = likes.track_id
+                ORDER BY likes.total_likes DESC
+                LIMIT :limit
+                """
+            )
+            rows = db.execute(stmt, {"limit": limit}).all()
+            return [(str(row[0]), int(row[1])) for row in rows]
+
     async def toggle_track_like(self, user_id: int, track_id: str) -> bool:
         with self._new_session() as db:
             try:
