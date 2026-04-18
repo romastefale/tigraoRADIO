@@ -222,9 +222,8 @@ def _register_handlers(dp: Dispatcher) -> None:
             user_total_likes = await likes_service.get_user_total_likes(user_id)
             liked = await likes_service.is_track_liked(user_id, track_id)
 
-            username = _telegram_identity(message)
+            display_name = message.from_user.full_name if message.from_user else "Unknown"
             if message.from_user and message.from_user.username:
-                username = f"@{message.from_user.username}"
                 user_link = f"https://t.me/{message.from_user.username}"
             else:
                 user_link = f"tg://user?id={user_id}"
@@ -234,10 +233,10 @@ def _register_handlers(dp: Dispatcher) -> None:
 
             track_name = html.escape(track_name)
             artist_name = html.escape(artist_name)
-            username = html.escape(username)
+            display_name = html.escape(display_name)
 
             caption = (
-                f"♫ <b><a href=\"{html.escape(user_link)}\">{username}</a></b> está ouvindo… · <i>♥ {user_total_likes}</i>\n\n"
+                f"♫ <b><a href=\"{html.escape(user_link)}\">{display_name}</a></b> está ouvindo · <i>♥ {user_total_likes}</i>\n\n"
                 f"♬ <b><a href=\"{html.escape(track_url)}\">{track_name}</a></b> — <i>{artist_name}</i>"
             )
 
@@ -301,10 +300,13 @@ def _register_handlers(dp: Dispatcher) -> None:
         user_id = callback.from_user.id
         user_plays = await likes_service.get_user_play_count(user_id, track_id)
         vez = "vez" if user_plays == 1 else "vezes"
-        await callback.answer(
-            f"♫ Você já ouviu {user_plays} {vez}",
-            show_alert=True
-        )
+        try:
+            await callback.answer(
+                f"♫ Você já ouviu {user_plays} {vez}",
+                show_alert=True
+            )
+        except:
+            pass
 
     @dp.callback_query(lambda c: c.data and c.data.startswith("like:"))
     async def like_track(callback: CallbackQuery) -> None:
