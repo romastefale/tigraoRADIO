@@ -1,7 +1,12 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "commands": [
+      "pip install -r requirements.txt",
+      "python -m playwright install chromium"
+    ]
+  },
   "deploy": {
-    "buildCommand": "python -m playwright install chromium",
     "startCommand": "python -m app.bootstrap",
     "healthcheckPath": "/healthz",
     "healthcheckTimeout": 60
