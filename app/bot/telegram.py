@@ -12,6 +12,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command
 from aiogram.types import (
     Message,
+    CallbackQuery,
     InlineQuery,
     InlineQueryResultPhoto,
     InlineKeyboardMarkup,
@@ -202,6 +203,8 @@ def _register_handlers(dp: Dispatcher) -> None:
 
             total_plays = await likes_service.get_track_play_count(db, track_id)
             total_likes = await likes_service.get_track_like_count(db, track_id)
+            liked = await likes_service.is_track_liked(db, user_id, track_id)
+            heart = "♥" if liked else "♡"
 
             username = _telegram_identity(message)
             user_link = f"tg://user?id={user_id}"
@@ -218,9 +221,13 @@ def _register_handlers(dp: Dispatcher) -> None:
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text=f"🎵 {total_plays} · ♡ {total_likes}",
-                            callback_data="playing_stats",
-                        )
+                            text=f"🎵 {total_plays}",
+                            callback_data=f"plays:{track_id}",
+                        ),
+                        InlineKeyboardButton(
+                            text=f"{heart} {total_likes}",
+                            callback_data=f"like:{track_id}",
+                        ),
                     ]
                 ]
             )
@@ -276,6 +283,42 @@ def _register_handlers(dp: Dispatcher) -> None:
         intent = detect_intent(message.text)
         if intent == "play":
             await play(message)
+
+    @dp.callback_query(lambda c: c.data and c.data.startswith("like:"))
+    async def like_toggle(callback: CallbackQuery) -> None:
+        if not callback.data or not callback.from_user or not callback.message:
+            await callback.answer()
+            return
+
+        track_id = callback.data.split(":", 1)[1]
+        user_id = callback.from_user.id
+        db = _new_session()
+
+        try:
+            liked = await likes_service.toggle_track_like(db, user_id, track_id)
+            total_likes = await likes_service.get_total_likes(db, track_id)
+            total_plays = await likes_service.get_track_play_count(db, track_id)
+            heart = "♥" if liked else "♡"
+
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text=f"🎵 {total_plays}",
+                            callback_data=f"plays:{track_id}",
+                        ),
+                        InlineKeyboardButton(
+                            text=f"{heart} {total_likes}",
+                            callback_data=f"like:{track_id}",
+                        ),
+                    ]
+                ]
+            )
+
+            await callback.message.edit_reply_markup(reply_markup=keyboard)
+            await callback.answer()
+        finally:
+            db.close()
 
 
 async def startup_telegram_bot() -> None:

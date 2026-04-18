@@ -37,5 +37,24 @@ class LikesService:
         result = db.execute(stmt).scalar_one()
         return int(result)
 
+    async def get_total_likes(self, db: Session, track_id: str) -> int:
+        return await self.get_track_like_count(db, track_id)
+
+    async def toggle_track_like(self, db: Session, user_id: int, track_id: str) -> bool:
+        stmt = select(TrackLike).where(
+            TrackLike.user_id == user_id,
+            TrackLike.track_id == track_id,
+        )
+        existing = db.execute(stmt).scalar_one_or_none()
+
+        if existing is not None:
+            db.delete(existing)
+            db.commit()
+            return False
+
+        db.add(TrackLike(user_id=user_id, track_id=track_id))
+        db.commit()
+        return True
+
 
 likes_service = LikesService()
