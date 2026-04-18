@@ -48,12 +48,15 @@ class LikesService:
             return int(result)
 
     async def get_user_total_likes(self, user_id: int) -> int:
+        print("SERVICE HIT")
         with self._new_session() as db:
             stmt = select(func.count(TrackLike.id)).where(TrackLike.user_id == user_id)
             result = db.execute(stmt).scalar_one()
+            print("DATA:", result)
             return int(result)
 
     async def get_user_top_tracks(self, user_id: int, limit: int = 5) -> list[tuple[str, int]]:
+        print("SERVICE HIT")
         with self._new_session() as db:
             stmt = text(
                 """
@@ -65,9 +68,11 @@ class LikesService:
                 """
             )
             rows = db.execute(stmt, {"user_id": user_id, "limit": limit}).all()
+            print("DATA:", rows)
             return [(str(row[0]), int(row[1])) for row in rows]
 
     async def get_user_top_artists(self, user_id: int, limit: int = 5) -> list[tuple[str, int]]:
+        print("SERVICE HIT")
         with self._new_session() as db:
             stmt = text(
                 """
@@ -80,9 +85,11 @@ class LikesService:
                 """
             )
             rows = db.execute(stmt, {"user_id": user_id, "limit": limit}).all()
+            print("DATA:", rows)
             return [(str(row[0]), int(row[1])) for row in rows]
 
     async def get_group_top_tracks(self, limit: int = 5) -> list[tuple[str, int]]:
+        print("SERVICE HIT")
         with self._new_session() as db:
             stmt = text(
                 """
@@ -94,12 +101,14 @@ class LikesService:
                 """
             )
             rows = db.execute(stmt, {"limit": limit}).all()
+            print("DATA:", rows)
             return [(str(row[0]), int(row[1])) for row in rows]
 
     async def get_top_tracks(self, limit: int = 5) -> list[tuple[str, int]]:
         return await self.get_group_top_tracks(limit=limit)
 
     async def get_group_top_artists(self, limit: int = 5) -> list[tuple[str, int]]:
+        print("SERVICE HIT")
         with self._new_session() as db:
             stmt = text(
                 """
@@ -111,12 +120,14 @@ class LikesService:
                 """
             )
             rows = db.execute(stmt, {"limit": limit}).all()
+            print("DATA:", rows)
             return [(str(row[0]), int(row[1])) for row in rows]
 
     async def get_top_artists(self, limit: int = 5) -> list[tuple[str, int]]:
         return await self.get_group_top_artists(limit=limit)
 
     async def get_group_most_liked_tracks(self, limit: int = 5) -> list[tuple[str, int]]:
+        print("SERVICE HIT")
         with self._new_session() as db:
             stmt = text(
                 """
@@ -136,6 +147,7 @@ class LikesService:
                 """
             )
             rows = db.execute(stmt, {"limit": limit}).all()
+            print("DATA:", rows)
             return [(str(row[0]), int(row[1])) for row in rows]
 
     async def get_most_liked_tracks(self, limit: int = 5) -> list[tuple[str, int]]:
