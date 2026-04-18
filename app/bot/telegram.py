@@ -275,17 +275,51 @@ def _register_handlers(dp: Dispatcher) -> None:
         for index, (artist_name, plays) in enumerate(top_artists, start=1):
             artists_lines.append(f"{index}. {artist_name} — {plays}")
 
+        tracks_block = "\n".join(tracks_lines)
+        artists_block = "\n".join(artists_lines)
         text = (
             "♫ Seu perfil\n\n"
-            f"{'\n'.join(tracks_lines)}\n\n"
-            f"{'\n'.join(artists_lines)}\n\n"
+            f"{tracks_block}\n\n"
+            f"{artists_block}\n\n"
             f"♥ Curtidas — {total_likes}"
         )
         await message.answer(text)
 
     @dp.message(Command("songcharts"))
     async def handle_songcharts(message: Message):
-        await message.answer("SONGCHARTS OK")
+        top_tracks = await likes_service.get_group_top_tracks(limit=5)
+        top_artists = await likes_service.get_group_top_artists(limit=5)
+        most_liked_tracks = await likes_service.get_group_most_liked_tracks(limit=5)
+
+        if not top_tracks and not top_artists and not most_liked_tracks:
+            await message.answer(
+                "♫ Ranking do grupo\n\n"
+                "Nenhum dado disponível ainda."
+            )
+            return
+
+        tracks_lines = ["♫ Músicas"]
+        for index, (track_name, plays) in enumerate(top_tracks, start=1):
+            tracks_lines.append(f"{index}. {track_name} — {plays}")
+
+        artists_lines = ["★ Artistas"]
+        for index, (artist_name, plays) in enumerate(top_artists, start=1):
+            artists_lines.append(f"{index}. {artist_name} — {plays}")
+
+        liked_lines = ["♥ Mais curtidas"]
+        for index, (track_name, likes) in enumerate(most_liked_tracks, start=1):
+            liked_lines.append(f"{index}. {track_name} — {likes}")
+
+        tracks_block = "\n".join(tracks_lines)
+        artists_block = "\n".join(artists_lines)
+        liked_block = "\n".join(liked_lines)
+        text = (
+            "♫ Ranking do grupo\n\n"
+            f"{tracks_block}\n\n"
+            f"{artists_block}\n\n"
+            f"{liked_block}"
+        )
+        await message.answer(text)
 
     @dp.message(Command("logout"))
     async def logout(message: Message) -> None:
