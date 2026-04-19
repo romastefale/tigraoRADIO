@@ -5,6 +5,7 @@ import logging
 
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import RedirectResponse
+from sqlalchemy import text
 
 from aiogram import Bot
 from aiogram.types import Update
@@ -35,6 +36,18 @@ async def on_startup() -> None:
     global bot
     init_db()
     run_migrations(engine)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS join_requests (
+                    user_id INTEGER,
+                    chat_id INTEGER,
+                    created_at DATETIME
+                );
+                """
+            )
+        )
     if TELEGRAM_BOT_TOKEN:
         bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
