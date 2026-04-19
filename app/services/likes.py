@@ -18,6 +18,12 @@ class LikesService:
         rows = db.execute(stmt).all()
         return any(str(row[1]) == column_name for row in rows)
 
+    def _normalize_optional_text(self, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
     async def register_play(
         self,
         user_id: int,
@@ -25,8 +31,8 @@ class LikesService:
         track_name: str | None = None,
         artist_name: str | None = None,
     ) -> None:
-        normalized_track_name = track_name.strip() if track_name else None
-        normalized_artist_name = artist_name.strip() if artist_name else None
+        normalized_track_name = self._normalize_optional_text(track_name)
+        normalized_artist_name = self._normalize_optional_text(artist_name)
         with self._new_session() as db:
             db.add(
                 TrackPlay(
@@ -191,8 +197,8 @@ class LikesService:
                     db.commit()
                     return False
 
-                normalized_track_name = track_name.strip() if track_name else None
-                normalized_artist_name = artist_name.strip() if artist_name else None
+                normalized_track_name = self._normalize_optional_text(track_name)
+                normalized_artist_name = self._normalize_optional_text(artist_name)
 
                 if normalized_track_name is None or normalized_artist_name is None:
                     play_stmt = (
@@ -204,13 +210,9 @@ class LikesService:
                     last_play = db.execute(play_stmt).first()
                     if last_play:
                         if normalized_track_name is None:
-                            normalized_track_name = (
-                                last_play[0].strip() if last_play[0] else None
-                            )
+                            normalized_track_name = self._normalize_optional_text(last_play[0])
                         if normalized_artist_name is None:
-                            normalized_artist_name = (
-                                last_play[1].strip() if last_play[1] else None
-                            )
+                            normalized_artist_name = self._normalize_optional_text(last_play[1])
 
                 db.add(
                     TrackLike(

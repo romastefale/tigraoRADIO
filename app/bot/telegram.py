@@ -32,6 +32,21 @@ bot_polling_task: asyncio.Task[None] | None = None
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 BLOCKED_WORDS = ["palavra1", "palavra2"]
 
+
+def _normalize_optional_text(value: object) -> str | None:
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned or None
+
+    if value is None:
+        return None
+
+    try:
+        cleaned = str(value).strip()
+    except Exception:
+        return None
+    return cleaned or None
+
 async def _handle_spotify_error(message: Message, exc: Exception) -> None:
     logger.exception("Telegram command failed", exc_info=exc)
     await message.answer(
@@ -202,13 +217,12 @@ def _register_handlers(dp: Dispatcher) -> None:
                 await message.answer("Nada está tocando agora.")
                 return
 
-            track_id = track.get("track_id")
+            track_id = _normalize_optional_text(track.get("track_id"))
             if not track_id:
                 await message.answer("Erro ao identificar a música.")
                 return
-            track_id = str(track_id)
-            track_name_raw = str(track.get("track_name") or "") or None
-            artist_name_raw = str(track.get("artist") or "") or None
+            track_name_raw = _normalize_optional_text(track.get("track_name"))
+            artist_name_raw = _normalize_optional_text(track.get("artist"))
 
             track_url = str(track.get("spotify_url") or "")
             await likes_service.register_play(
@@ -229,8 +243,8 @@ def _register_handlers(dp: Dispatcher) -> None:
             else:
                 user_link = f"tg://user?id={user_id}"
 
-            track_name = str(track.get("track_name") or "")
-            artist_name = str(track.get("artist") or "")
+            track_name = track_name_raw or ""
+            artist_name = artist_name_raw or ""
 
             track_name = html.escape(track_name)
             artist_name = html.escape(artist_name)
