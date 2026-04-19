@@ -1,14 +1,11 @@
 from __future__ import annotations
-
-import asyncio
 import html
 import logging
 import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from aiogram import Bot, Dispatcher, F
-from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram import Dispatcher, F
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import (
@@ -19,9 +16,7 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
 )
-from app.bot.private_tools import router as private_router
 from app.bot.intent import detect_intent
-from app.config.settings import TELEGRAM_BOT_TOKEN
 from app.core.runtime import allow
 from app.services.likes import likes_service
 from app.services.spotify import spotify_service
@@ -29,7 +24,6 @@ from app.services.spotify import spotify_service
 logger = logging.getLogger(__name__)
 
 bot_dispatcher: Dispatcher = Dispatcher()
-bot_polling_task: asyncio.Task[None] | None = None
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 BLOCKED_WORDS = ["palavra1", "palavra2"]
 
@@ -441,33 +435,5 @@ def _register_handlers(dp: Dispatcher) -> None:
             pass
 
 
-async def startup_telegram_bot() -> None:
-    global bot_dispatcher, bot_polling_task
-
-    if not TELEGRAM_BOT_TOKEN:
-        logger.warning("TELEGRAM_BOT_TOKEN missing; Telegram bot is disabled")
-        return
-
-    if bot_polling_task and not bot_polling_task.done():
-        return
-
-    bot = Bot(token=TELEGRAM_BOT_TOKEN, session=AiohttpSession(timeout=10))
-    bot_dispatcher.include_router(private_router)
-    _register_handlers(bot_dispatcher)
-
-    bot_polling_task = asyncio.create_task(bot_dispatcher.start_polling(bot))
-
-
 async def shutdown_telegram_bot() -> None:
-    global bot_polling_task
-
-    if bot_polling_task is None:
-        return
-
-    bot_polling_task.cancel()
-    try:
-        await bot_polling_task
-    except asyncio.CancelledError:
-        pass
-    finally:
-        bot_polling_task = None
+    return

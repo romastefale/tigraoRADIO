@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from fastapi import FastAPI, Query, Request
@@ -10,8 +9,9 @@ from sqlalchemy import text
 from aiogram import Bot
 from aiogram.types import Update
 
-from app.bot.telegram import shutdown_telegram_bot, startup_telegram_bot, bot_dispatcher
-from app.config.settings import TELEGRAM_BOT_TOKEN
+from app.bot.private_tools import router as private_router
+from app.bot.telegram import _register_handlers, shutdown_telegram_bot, bot_dispatcher
+from app.config.settings import BASE_URL, TELEGRAM_BOT_TOKEN
 from app.db.database import engine, init_db, run_migrations
 from app.services.spotify import spotify_service
 
@@ -20,20 +20,12 @@ app = FastAPI(title="Minimal Backend")
 logger = logging.getLogger(__name__)
 
 bot: Bot | None = None
-
-
-def _log_background_task_result(task: asyncio.Task[None], task_name: str) -> None:
-    try:
-        task.result()
-    except asyncio.CancelledError:
-        return
-    except Exception:
-        logger.exception("Background task '%s' failed", task_name)
+_telegram_dispatcher_configured = False
 
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    global bot
+    global bot, _telegram_dispatcher_configured
     init_db()
     run_migrations(engine)
     with engine.begin() as conn:
@@ -50,11 +42,11 @@ async def on_startup() -> None:
         )
     if TELEGRAM_BOT_TOKEN:
         bot = Bot(token=TELEGRAM_BOT_TOKEN)
-
-    telegram_startup_task = asyncio.create_task(startup_telegram_bot())
-    telegram_startup_task.add_done_callback(
-        lambda task: _log_background_task_result(task, "telegram_startup")
-    )
+        if not _telegram_dispatcher_configured:
+            bot_dispatcher.include_router(private_router)
+            _register_handlers(bot_dispatcher)
+            _telegram_dispatcher_configured = True
+        await bot.set_webhook(f"{BASE_URL}/webhook")
 
 
 @app.on_event("shutdown")
