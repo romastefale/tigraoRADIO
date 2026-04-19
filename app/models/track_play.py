@@ -14,4 +14,6 @@ class TrackPlay(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     track_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    track_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    artist_name: Mapped[str | None] = mapped_column(String, nullable=True)
     played_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
