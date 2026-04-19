@@ -452,11 +452,12 @@ async def startup_telegram_bot() -> None:
         return
 
     bot = Bot(token=TELEGRAM_BOT_TOKEN, session=AiohttpSession(timeout=10))
-    bot_dispatcher = Dispatcher()
-    bot_dispatcher.include_router(private_router)
-    _register_handlers(bot_dispatcher)
+    dp = Dispatcher()
+    dp.include_router(private_router)
+    _register_handlers(dp)
 
-    bot_polling_task = asyncio.create_task(bot_dispatcher.start_polling(bot))
+    bot_dispatcher = dp
+    bot_polling_task = asyncio.create_task(dp.start_polling(bot))
 
 
 async def shutdown_telegram_bot() -> None:
