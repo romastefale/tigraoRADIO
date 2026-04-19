@@ -2,12 +2,17 @@
 
 Bot Telegram que mostra a música atual do Spotify.
 
-## Comandos
+## Comandos principais
 - /start
 - /help
 - /login
 - /logout
-- /play
+- /playing
+
+## Comandos privados (owner)
+- /myjoin
+- /mylink
+- /mybad <user_id>
 
 ## Gatilhos
 - tocando
@@ -23,6 +28,9 @@ Bot Telegram que mostra a música atual do Spotify.
 ```bash
 python app/bootstrap.py
 ```
+
+## Documentação técnica
+- Diagnóstico pós-implementação do módulo de controle de entrada: `docs/diagnostico-pos-implementacao.md`
 
 ## Observações
 - requer login Spotify
