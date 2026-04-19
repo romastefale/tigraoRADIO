@@ -291,9 +291,7 @@ def _register_handlers(dp: Dispatcher) -> None:
             return
 
         tracks_lines = ["♫ Músicas"]
-        for index, (track_id, plays) in enumerate(top_tracks, start=1):
-            track_name = track_id
-            track_label = track_name if track_name else track_id
+        for index, (track_label, plays) in enumerate(top_tracks, start=1):
             tracks_lines.append(f"♫ {index}. {track_label} — {plays}")
 
         artists_lines = ["★ Artistas"]
@@ -328,9 +326,7 @@ def _register_handlers(dp: Dispatcher) -> None:
             return
 
         tracks_lines = ["♫ Músicas"]
-        for index, (track_id, plays) in enumerate(top_tracks, start=1):
-            track_name = track_id
-            track_label = track_name if track_name else track_id
+        for index, (track_label, plays) in enumerate(top_tracks, start=1):
             tracks_lines.append(f"♫ {index}. {track_label} — {plays}")
 
         artists_lines = ["★ Artistas"]
@@ -339,9 +335,7 @@ def _register_handlers(dp: Dispatcher) -> None:
             artists_lines.append(f"★ {index}. {artist_label} — {plays}")
 
         liked_lines = ["♥ Mais curtidas"]
-        for index, (track_id, likes) in enumerate(most_liked_tracks, start=1):
-            track_name = track_id
-            track_label = track_name if track_name else track_id
+        for index, (track_label, likes) in enumerate(most_liked_tracks, start=1):
             liked_lines.append(f"♥ {index}. {track_label} — {likes}")
 
         tracks_block = "\n".join(tracks_lines)
