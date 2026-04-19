@@ -28,7 +28,8 @@ from app.services.spotify import spotify_service
 
 logger = logging.getLogger(__name__)
 
-bot_dispatcher: Dispatcher | None = None
+bot_dispatcher: Dispatcher = Dispatcher()
+bot_dispatcher.include_router(private_router)
 bot_polling_task: asyncio.Task[None] | None = None
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 BLOCKED_WORDS = ["palavra1", "palavra2"]
@@ -452,8 +453,6 @@ async def startup_telegram_bot() -> None:
         return
 
     bot = Bot(token=TELEGRAM_BOT_TOKEN, session=AiohttpSession(timeout=10))
-    bot_dispatcher = Dispatcher()
-    bot_dispatcher.include_router(private_router)
     _register_handlers(bot_dispatcher)
 
     bot_polling_task = asyncio.create_task(bot_dispatcher.start_polling(bot))
