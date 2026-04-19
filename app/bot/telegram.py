@@ -19,6 +19,7 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
 )
+from app.bot.private_tools import router as private_router
 from app.bot.intent import detect_intent
 from app.config.settings import TELEGRAM_BOT_TOKEN
 from app.core.runtime import allow
@@ -452,7 +453,7 @@ async def startup_telegram_bot() -> None:
 
     bot = Bot(token=TELEGRAM_BOT_TOKEN, session=AiohttpSession(timeout=10))
     bot_dispatcher = Dispatcher()
-    bot_dispatcher.include_router(__import__("app.bot.private_tools", fromlist=["router"]).router)
+    bot_dispatcher.include_router(private_router)
     _register_handlers(bot_dispatcher)
 
     bot_polling_task = asyncio.create_task(bot_dispatcher.start_polling(bot))
