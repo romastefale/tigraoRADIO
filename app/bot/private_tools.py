@@ -165,3 +165,32 @@ async def mybad(message: Message) -> None:
         )
 
     await message.answer("✅ Join request approved.")
+
+
+@router.message(Command("purge"))
+async def purge(message: Message) -> None:
+    _ensure_join_requests_table()
+
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) < 2 or not args[1].strip().isdigit():
+        await message.answer("❌")
+        return
+
+    user_id = int(args[1].strip())
+
+    try:
+        await message.bot.ban_chat_member(
+            chat_id=MAIN_GROUP_ID,
+            user_id=user_id,
+        )
+    except Exception:
+        await message.answer("❌")
+        return
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("DELETE FROM join_requests WHERE user_id = :user_id"),
+            {"user_id": user_id},
+        )
+
+    await message.answer("🚫")
