@@ -207,9 +207,16 @@ def _register_handlers(dp: Dispatcher) -> None:
                 await message.answer("Erro ao identificar a música.")
                 return
             track_id = str(track_id)
+            track_name_raw = str(track.get("track_name") or "") or None
+            artist_name_raw = str(track.get("artist") or "") or None
 
             track_url = str(track.get("spotify_url") or "")
-            await likes_service.register_play(user_id, track_id)
+            await likes_service.register_play(
+                user_id,
+                track_id,
+                track_name=track_name_raw,
+                artist_name=artist_name_raw,
+            )
 
             total_plays = await likes_service.get_track_play_count(track_id)
             total_likes = await likes_service.get_total_likes(track_id)

@@ -18,9 +18,24 @@ class LikesService:
         rows = db.execute(stmt).all()
         return any(str(row[1]) == column_name for row in rows)
 
-    async def register_play(self, user_id: int, track_id: str) -> None:
+    async def register_play(
+        self,
+        user_id: int,
+        track_id: str,
+        track_name: str | None = None,
+        artist_name: str | None = None,
+    ) -> None:
+        normalized_track_name = track_name.strip() if track_name else None
+        normalized_artist_name = artist_name.strip() if artist_name else None
         with self._new_session() as db:
-            db.add(TrackPlay(user_id=user_id, track_id=track_id))
+            db.add(
+                TrackPlay(
+                    user_id=user_id,
+                    track_id=track_id,
+                    track_name=normalized_track_name,
+                    artist_name=normalized_artist_name,
+                )
+            )
             db.commit()
 
     async def get_track_play_count(self, track_id: str) -> int:
@@ -157,7 +172,13 @@ class LikesService:
     async def get_most_liked_tracks(self, limit: int = 5) -> list[tuple[str, int]]:
         return await self.get_group_most_liked_tracks(limit=limit)
 
-    async def toggle_track_like(self, user_id: int, track_id: str) -> bool:
+    async def toggle_track_like(
+        self,
+        user_id: int,
+        track_id: str,
+        track_name: str | None = None,
+        artist_name: str | None = None,
+    ) -> bool:
         with self._new_session() as db:
             try:
                 stmt = select(TrackLike).where(
@@ -170,7 +191,36 @@ class LikesService:
                     db.commit()
                     return False
 
-                db.add(TrackLike(user_id=user_id, track_id=track_id))
+                normalized_track_name = track_name.strip() if track_name else None
+                normalized_artist_name = artist_name.strip() if artist_name else None
+
+                if normalized_track_name is None or normalized_artist_name is None:
+                    play_stmt = (
+                        select(TrackPlay.track_name, TrackPlay.artist_name)
+                        .where(TrackPlay.track_id == track_id)
+                        .order_by(TrackPlay.played_at.desc())
+                        .limit(1)
+                    )
+                    last_play = db.execute(play_stmt).first()
+                    if last_play:
+                        if normalized_track_name is None:
+                            normalized_track_name = (
+                                last_play[0].strip() if last_play[0] else None
+                            )
+                        if normalized_artist_name is None:
+                            normalized_artist_name = (
+                                last_play[1].strip() if last_play[1] else None
+                            )
+
+                db.add(
+                    TrackLike(
+                        user_id=user_id,
+                        track_id=track_id,
+                        track_name=normalized_track_name,
+                        artist_name=normalized_artist_name,
+                        liked=1,
+                    )
+                )
                 db.commit()
                 return True
             except IntegrityError:
