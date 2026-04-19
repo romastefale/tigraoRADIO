@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
+from aiogram.filters import Command
 from aiogram.types import ChatJoinRequest, Message
 from sqlalchemy import text
 
@@ -15,7 +16,10 @@ APPROVAL_WINDOW = timedelta(hours=2)
 SINGLE_USE_EXPIRY = timedelta(minutes=5)
 
 router = Router(name="private_tools")
-router.message.filter(F.from_user.id == OWNER_ID, F.chat.type == "private")
+router.message.filter(
+    F.from_user.id == OWNER_ID,
+    F.chat.type == "private",
+)
 
 
 def _ensure_join_requests_table() -> None:
@@ -24,30 +28,16 @@ def _ensure_join_requests_table() -> None:
             text(
                 """
                 CREATE TABLE IF NOT EXISTS join_requests (
-                    user_id BIGINT NOT NULL,
-                    chat_id BIGINT NOT NULL,
-                    created_at TIMESTAMP NOT NULL
-                )
+                    user_id INTEGER,
+                    chat_id INTEGER,
+                    created_at DATETIME
+                );
                 """
             )
         )
 
 
-def _parse_target_user_id(raw_text: str) -> int | None:
-    if not raw_text.startswith("!mybad ") or not raw_text.endswith("¡"):
-        return None
-
-    payload = raw_text[len("!mybad ") : -1].strip()
-    if not payload or not payload.isdigit():
-        return None
-
-    try:
-        return int(payload)
-    except ValueError:
-        return None
-
-
-def _to_utc(value: object) -> datetime | None:
+def _parse_created_at(value: object) -> datetime | None:
     if isinstance(value, datetime):
         if value.tzinfo is None:
             return value.replace(tzinfo=timezone.utc)
@@ -66,9 +56,8 @@ def _to_utc(value: object) -> datetime | None:
 
 
 @router.chat_join_request()
-async def store_join_request(join_request: ChatJoinRequest) -> None:
+async def handle_join_request(event: ChatJoinRequest) -> None:
     _ensure_join_requests_table()
-    created_at = datetime.now(timezone.utc)
 
     with engine.begin() as conn:
         conn.execute(
@@ -79,22 +68,57 @@ async def store_join_request(join_request: ChatJoinRequest) -> None:
                 """
             ),
             {
-                "user_id": join_request.from_user.id,
-                "chat_id": join_request.chat.id,
-                "created_at": created_at,
+                "user_id": event.from_user.id,
+                "chat_id": event.chat.id,
+                "created_at": datetime.now(timezone.utc),
             },
         )
 
 
-@router.message(F.text.startswith("!mybad"))
-async def approve_join_request(message: Message) -> None:
-    raw_text = message.text or ""
-    target_user_id = _parse_target_user_id(raw_text)
-    if target_user_id is None:
+@router.message(Command("myjoin"))
+async def myjoin(message: Message) -> None:
+    try:
+        invite = await message.bot.create_chat_invite_link(
+            chat_id=MAIN_GROUP_ID,
+            creates_join_request=False,
+            member_limit=1,
+            expire_date=datetime.now(timezone.utc) + SINGLE_USE_EXPIRY,
+        )
+        await message.answer(invite.invite_link)
+    except Exception:
+        await message.answer("❌ Failed to create direct invite link.")
+
+
+@router.message(Command("mylink"))
+async def mylink(message: Message) -> None:
+    try:
+        invite = await message.bot.create_chat_invite_link(
+            chat_id=MAIN_GROUP_ID,
+            creates_join_request=True,
+        )
+        await message.answer(invite.invite_link)
+    except Exception:
+        await message.answer("❌ Failed to create join-request link.")
+
+
+@router.message(Command("mybad"))
+async def mybad(message: Message) -> None:
+    _ensure_join_requests_table()
+
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) < 2 or not args[1].strip().isdigit():
+        await message.answer("Usage: /mybad <user_id>")
         return
 
-    _ensure_join_requests_table()
+    target_user_id = int(args[1].strip())
+    cutoff = datetime.now(timezone.utc) - APPROVAL_WINDOW
+
     with engine.begin() as conn:
+        conn.execute(
+            text("DELETE FROM join_requests WHERE created_at < :cutoff"),
+            {"cutoff": cutoff},
+        )
+
         row = conn.execute(
             text(
                 """
@@ -109,16 +133,12 @@ async def approve_join_request(message: Message) -> None:
         ).mappings().first()
 
     if not row:
-        await message.answer("❌")
+        await message.answer("❌ No recent join request found for this user.")
         return
 
-    created_at = _to_utc(row["created_at"])
-    if created_at is None:
-        await message.answer("❌")
-        return
-
-    if datetime.now(timezone.utc) - created_at > APPROVAL_WINDOW:
-        await message.answer("❌")
+    created_at = _parse_created_at(row["created_at"])
+    if created_at is None or created_at < cutoff:
+        await message.answer("❌ Join request expired.")
         return
 
     try:
@@ -126,42 +146,22 @@ async def approve_join_request(message: Message) -> None:
             chat_id=int(row["chat_id"]),
             user_id=int(row["user_id"]),
         )
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    """
-                    DELETE FROM join_requests
-                    WHERE user_id = :user_id AND chat_id = :chat_id
-                    """
-                ),
-                {"user_id": int(row["user_id"]), "chat_id": int(row["chat_id"])},
-            )
-        await message.answer("✅")
     except Exception:
-        await message.answer("❌")
+        await message.answer("❌ Failed to approve join request.")
+        return
 
-
-@router.message(F.text == "!mylink¡")
-async def create_join_request_link(message: Message) -> None:
-    try:
-        invite = await message.bot.create_chat_invite_link(
-            chat_id=MAIN_GROUP_ID,
-            creates_join_request=True,
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                DELETE FROM join_requests
+                WHERE user_id = :user_id AND chat_id = :chat_id
+                """
+            ),
+            {
+                "user_id": int(row["user_id"]),
+                "chat_id": int(row["chat_id"]),
+            },
         )
-        await message.answer(invite.invite_link)
-    except Exception:
-        await message.answer("❌")
 
-
-@router.message(F.text == "!myjoin¡")
-async def create_single_use_link(message: Message) -> None:
-    try:
-        invite = await message.bot.create_chat_invite_link(
-            chat_id=MAIN_GROUP_ID,
-            creates_join_request=False,
-            member_limit=1,
-            expire_date=datetime.now(timezone.utc) + SINGLE_USE_EXPIRY,
-        )
-        await message.answer(invite.invite_link)
-    except Exception:
-        await message.answer("❌")
+    await message.answer("✅ Join request approved.")
