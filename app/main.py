@@ -11,7 +11,7 @@ from aiogram.types import Update
 
 from app.bot.telegram import shutdown_telegram_bot, startup_telegram_bot, bot_dispatcher
 from app.config.settings import TELEGRAM_BOT_TOKEN
-from app.db.database import init_db
+from app.db.database import engine, init_db, run_migrations
 from app.services.spotify import spotify_service
 
 
@@ -34,6 +34,7 @@ def _log_background_task_result(task: asyncio.Task[None], task_name: str) -> Non
 async def on_startup() -> None:
     global bot
     init_db()
+    run_migrations(engine)
     if TELEGRAM_BOT_TOKEN:
         bot = Bot(token=TELEGRAM_BOT_TOKEN)
 

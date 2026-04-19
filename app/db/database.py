@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.config.settings import DATABASE_URL
@@ -43,6 +43,34 @@ SessionLocal = sessionmaker(
 )
 
 Base = declarative_base()
+
+
+def run_migrations(engine) -> None:
+    with engine.begin() as conn:
+        try:
+            conn.execute(text("ALTER TABLE track_plays ADD COLUMN track_name TEXT"))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("ALTER TABLE track_plays ADD COLUMN artist_name TEXT"))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("ALTER TABLE track_likes ADD COLUMN track_name TEXT"))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("ALTER TABLE track_likes ADD COLUMN artist_name TEXT"))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("ALTER TABLE track_likes ADD COLUMN liked INTEGER DEFAULT 1"))
+        except Exception:
+            pass
 
 
 # ========================
