@@ -290,7 +290,10 @@ def _register_handlers(dp: Dispatcher) -> None:
                 await message.answer("Nada está tocando agora.")
                 return
 
-            track_id = track.get("track_id")
+            track_id = _normalize_optional_text(track.get("track_id"))
+            if not track_id:
+                await message.answer("Erro ao identificar a música.")
+                return
 
             valence = None
             energy = None
@@ -367,8 +370,16 @@ def _register_handlers(dp: Dispatcher) -> None:
             safe_track = html.escape(track_name)
             safe_artist = html.escape(artist)
 
-            user_link = f"{safe_name}"
+            if message.from_user and message.from_user.username:
+                profile_link = f"https://t.me/{message.from_user.username}"
+            else:
+                profile_link = f"tg://user?id={user_id}"
+            user_link = f"<a href=\"{html.escape(profile_link)}\">{safe_name}</a>"
             score = await likes_service.get_user_total_likes(user_id)
+            total_plays = await likes_service.get_track_play_count(track_id)
+            total_likes = await likes_service.get_total_likes(track_id)
+            liked = await likes_service.is_track_liked(user_id, track_id)
+            keyboard = _playing_keyboard(track_id, total_plays, total_likes, liked)
 
             if valence >= 0.75:
                 diagnostic = random.choice(
@@ -421,10 +432,20 @@ def _register_handlers(dp: Dispatcher) -> None:
                 f"↗ {trend}"
             )
 
-            if history_count < 3:
-                caption += "\nℹ baseado em poucas músicas analisadas"
-
-            await message.answer(caption)
+            album_image_url = track.get("album_image_url")
+            if album_image_url:
+                await message.answer_photo(
+                    photo=str(album_image_url),
+                    caption=caption,
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+            else:
+                await message.answer(
+                    caption,
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
 
         except Exception as exc:
             await _handle_spotify_error(message, exc)
