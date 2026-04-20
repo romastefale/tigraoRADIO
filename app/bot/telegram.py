@@ -582,7 +582,7 @@ def _register_handlers(dp: Dispatcher) -> None:
 
         if not top_tracks and not top_artists and not most_liked_tracks:
             await message.answer(
-                "♫ Ranking do grupo\n\n"
+                "♫ Charts\n\n"
                 "Nenhum dado disponível ainda."
             )
             return
