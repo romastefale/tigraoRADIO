@@ -127,7 +127,7 @@ def _register_handlers(dp: Dispatcher) -> None:
     async def inline_play(query: InlineQuery) -> None:
         text = (query.query or "").strip().lower()
 
-        if text != "p":
+        if text not in {"p", "m"}:
             return
 
         user_id = query.from_user.id
@@ -135,24 +135,94 @@ def _register_handlers(dp: Dispatcher) -> None:
         if not track:
             return
 
-        status_line = _format_play_status(track, query.from_user.full_name)
-        caption = _play_caption(
-            status_line=status_line,
-            spotify_url=track.get("spotify_url"),
-            track_name=str(track.get("track_name") or ""),
-            artist=str(track.get("artist") or ""),
-        )
-
         album_image_url = track.get("album_image_url")
         if not album_image_url:
             return
+
+        if text == "p":
+            status_line = _format_play_status(track, query.from_user.full_name)
+            caption = _play_caption(
+                status_line=status_line,
+                spotify_url=track.get("spotify_url"),
+                track_name=str(track.get("track_name") or ""),
+                artist=str(track.get("artist") or ""),
+            )
+
+            result = InlineQueryResultPhoto(
+                id=str(uuid.uuid4()),
+                photo_url=album_image_url,
+                thumbnail_url=album_image_url,
+                caption=caption,
+                parse_mode="HTML",
+            )
+
+            await query.answer([result], cache_time=1)
+            return
+
+        def bar(value: float) -> str:
+            filled = max(1, int(max(0, min(1, value)) * 5))
+            return "▰" * filled + "▱" * (5 - filled)
+
+        valence = float(track.get("valence")) if track.get("valence") is not None else 0.5
+        energy = float(track.get("energy")) if track.get("energy") is not None else 0.5
+        danceability = float(track.get("danceability")) if track.get("danceability") is not None else 0.5
+        trend = str(track.get("trend") or "estável")
+
+        if valence >= 0.75:
+            diagnostic = random.choice(
+                [
+                    "vibe muito feliz",
+                    "vibe em alta",
+                    "vibe radiante",
+                ]
+            )
+        elif valence >= 0.55:
+            diagnostic = random.choice(
+                [
+                    "vibe boa",
+                    "vibe de boa",
+                    "vibe leve",
+                ]
+            )
+        elif valence >= 0.40:
+            diagnostic = random.choice(
+                [
+                    "vibe estável",
+                    "vibe equilibrada",
+                ]
+            )
+        elif valence >= 0.25:
+            diagnostic = random.choice(
+                [
+                    "vibe pensativa",
+                    "vibe mais introspectiva",
+                ]
+            )
+        else:
+            diagnostic = random.choice(
+                [
+                    "vibe introspectiva",
+                    "vibe reflexiva",
+                ]
+            )
+
+        track_name = str(track.get("track_name") or "")
+        artist = str(track.get("artist") or "")
+        caption = (
+            f"♫ {track_name} — {artist}\n\n"
+            "♩ Mood\n\n"
+            f"☻ {bar(valence)}  humor\n"
+            f"ϟ {bar(energy)}  energia\n"
+            f"✶ {bar(danceability)}  ritmo\n\n"
+            f"≡ {diagnostic}\n"
+            f"↗ {trend}"
+        )
 
         result = InlineQueryResultPhoto(
             id=str(uuid.uuid4()),
             photo_url=album_image_url,
             thumbnail_url=album_image_url,
             caption=caption,
-            parse_mode="HTML",
         )
 
         await query.answer([result], cache_time=1)
