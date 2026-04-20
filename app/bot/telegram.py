@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from aiogram import Dispatcher, F
+from aiogram import Bot, Dispatcher, F
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import (
@@ -267,6 +267,39 @@ def _register_handlers(dp: Dispatcher) -> None:
         except Exception as exc:
             await _handle_spotify_error(message, exc)
 
+
+    @dp.message(Command("mood"))
+    async def mood_command(message: Message, bot: Bot):
+        try:
+            user_id = message.from_user.id
+
+            track = await spotify_service.get_current_or_last_played(user_id)
+            if not track:
+                await message.answer("❌")
+                return
+
+            def bar(value: float) -> str:
+                filled = int(value * 8)
+                return "▰" * filled + "▱" * (8 - filled)
+
+            popularity = track.get("popularity", 50) / 100
+            energy = popularity
+            valence = 1 - abs(0.5 - popularity) * 2
+            dance = popularity * 0.8
+            username = message.from_user.username or "user"
+            track_name = str(track.get("track_name") or track.get("name") or "")
+            artist = str(track.get("artist") or "")
+            text = (
+                f"🎹 @{username} está ouvindo\n\n"
+                f"🎧 <b>{html.escape(track_name)}</b> — <i>{html.escape(artist)}</i>\n\n"
+                f"🧠 Leitura musical\n\n"
+                f"😄 {bar(valence)}\n"
+                f"⚡ {bar(energy)}\n"
+                f"🎧 {bar(dance)}"
+            )
+            await message.answer(text, parse_mode="HTML")
+        except Exception:
+            await message.answer("❌")
 
     @dp.message(Command("myself"))
     async def handle_myself(message: Message):
