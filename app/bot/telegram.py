@@ -140,40 +140,8 @@ def _register_handlers(dp: Dispatcher) -> None:
     # ========================
     @dp.inline_query()
     async def inline_play(query: InlineQuery) -> None:
-        raw = (query.query or "").lower()
-        text = raw.strip()
-
-        if raw not in {"playing", "playing ", "mood", "mood "}:
-            return
-
-        if text == "playing":
-            user_id = query.from_user.id
-            track = await spotify_service.get_current_or_last_played(user_id)
-            if not track:
-                return
-
-            album_image_url = track.get("album_image_url") or "https://via.placeholder.com/512"
-            display_name = query.from_user.full_name or "Usuário"
-            track_name = str(track.get("track_name") or "")
-            artist = str(track.get("artist") or "")
-            track_id = track.get("track_id")
-            if track_id:
-                plays = await likes_service.get_user_track_plays(user_id, track_id)
-            else:
-                plays = 0
-            caption = (
-                f"{display_name} · ♪ {plays}\n"
-                f"♫ {track_name} — {artist}"
-            )
-
-            result = InlineQueryResultPhoto(
-                id=str(uuid.uuid4()),
-                photo_url=album_image_url,
-                thumbnail_url=album_image_url,
-                caption=caption,
-            )
-
-            await query.answer([result], cache_time=5)
+        text = (query.query or "").strip().lower()
+        if text != "playing":
             return
 
         user_id = query.from_user.id
@@ -181,63 +149,20 @@ def _register_handlers(dp: Dispatcher) -> None:
         if not track:
             return
 
-        album_image_url = track.get("album_image_url") or "https://via.placeholder.com/512"
-
-        def bar(value: float) -> str:
-            filled = max(1, int(max(0, min(1, value)) * 5))
-            return "▰" * filled + "▱" * (5 - filled)
-
-        valence = float(track.get("valence")) if track.get("valence") is not None else 0.5
-        energy = float(track.get("energy")) if track.get("energy") is not None else 0.5
-        danceability = float(track.get("danceability")) if track.get("danceability") is not None else 0.5
-        trend = str(track.get("trend") or "estável")
-
-        if valence >= 0.75:
-            diagnostic = random.choice(
-                [
-                    "vibe muito feliz",
-                    "vibe em alta",
-                    "vibe radiante",
-                ]
-            )
-        elif valence >= 0.55:
-            diagnostic = random.choice(
-                [
-                    "vibe boa",
-                    "vibe de boa",
-                    "vibe leve",
-                ]
-            )
-        elif valence >= 0.40:
-            diagnostic = random.choice(
-                [
-                    "vibe estável",
-                    "vibe equilibrada",
-                ]
-            )
-        elif valence >= 0.25:
-            diagnostic = random.choice(
-                [
-                    "vibe pensativa",
-                    "vibe mais introspectiva",
-                ]
-            )
-        else:
-            diagnostic = random.choice(
-                [
-                    "vibe introspectiva",
-                    "vibe reflexiva",
-                ]
-            )
-
+        track_id = track.get("track_id")
         track_name = str(track.get("track_name") or "")
         artist = str(track.get("artist") or "")
+        display_name = query.from_user.full_name or "Usuário"
+        if track_id:
+            await likes_service.register_play(user_id, track_id)
+        if track_id:
+            plays = await likes_service.get_user_track_plays(user_id, track_id)
+        else:
+            plays = 0
+        album_image_url = track.get("album_image_url") or "https://via.placeholder.com/512"
         caption = (
-            f"♫ {track_name} — {artist}\n\n"
-            f"☻ {bar(valence)}  humor\n"
-            f"ϟ {bar(energy)}  energia\n"
-            f"✶ {bar(danceability)}  ritmo\n\n"
-            f"≡ {diagnostic}"
+            f"{display_name} · ♪ {plays}\n"
+            f"♫ {track_name} — {artist}"
         )
 
         result = InlineQueryResultPhoto(
@@ -247,7 +172,7 @@ def _register_handlers(dp: Dispatcher) -> None:
             caption=caption,
         )
 
-        await query.answer([result], cache_time=5)
+        await query.answer([result], cache_time=3)
 
     # ========================
     # COMMANDS
