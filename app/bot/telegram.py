@@ -438,7 +438,6 @@ def _register_handlers(dp: Dispatcher) -> None:
                     photo=str(album_image_url),
                     caption=caption,
                     parse_mode="HTML",
-                    reply_markup=keyboard,
                 )
             else:
                 await message.answer(
