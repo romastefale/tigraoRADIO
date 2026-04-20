@@ -384,8 +384,9 @@ def _register_handlers(dp: Dispatcher) -> None:
             track_name = html.escape(track_name_raw or "")
             artist_name = html.escape(artist_name_raw or "")
             group_name = html.escape(group_name_raw or "")
+            spotify_url = html.escape(str(track.get("spotify_url") or ""))
 
-            caption = f"♫ {group_name} está ouvindo {track_name} — {artist_name}"
+            caption = f'<b><i>♫ {group_name} está ouvindo </i></b><a href="{spotify_url}"><b>{track_name}</b></a><b><i> — {artist_name}</i></b>'
 
             album_image_url = track.get("album_image_url")
             if album_image_url:
