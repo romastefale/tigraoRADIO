@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import html
 import logging
 import uuid
@@ -19,6 +20,7 @@ from aiogram.types import (
 from app.bot.intent import detect_intent
 from app.core.runtime import allow
 from app.services.likes import likes_service
+from app.services.enrichment import enrich_track_if_missing
 from app.services.spotify import spotify_service
 
 logger = logging.getLogger(__name__)
@@ -260,9 +262,11 @@ def _register_handlers(dp: Dispatcher) -> None:
                     parse_mode="HTML",
                     reply_markup=keyboard,
                 )
+                asyncio.create_task(enrich_track_if_missing(track_id))
                 return
 
             await message.answer(caption, parse_mode="HTML", reply_markup=keyboard)
+            asyncio.create_task(enrich_track_if_missing(track_id))
 
         except Exception as exc:
             await _handle_spotify_error(message, exc)

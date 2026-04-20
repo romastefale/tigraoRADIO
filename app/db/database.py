@@ -47,6 +47,20 @@ Base = declarative_base()
 
 def run_migrations(engine) -> None:
     with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS track_audio_features (
+                    track_id TEXT PRIMARY KEY,
+                    valence REAL,
+                    energy REAL,
+                    danceability REAL,
+                    created_at DATETIME
+                )
+                """
+            )
+        )
+
         try:
             conn.execute(text("ALTER TABLE track_plays ADD COLUMN track_name TEXT"))
         except Exception:
