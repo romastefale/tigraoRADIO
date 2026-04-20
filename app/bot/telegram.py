@@ -385,38 +385,37 @@ def _register_handlers(dp: Dispatcher) -> None:
 
             if valence is not None and energy is not None:
                 response_text = (
-                    f"🎹 {user_label} está ouvindo\n"
-                    f"🏅 nível: {rank}\n\n"
-                    f"🎧 {track_name} — {artist}\n\n"
-                    "🧠 Leitura musical\n\n"
-                    f"😄 {mood_valence}\n"
-                    f"⚡ {mood_energy}\n"
-                    f"🎧 {mood_danceability}\n\n"
-                    f"📈 tendência: {trend}\n"
-                    f"📊 baseado em {history_count} músicas analisadas"
+                    f"♫ {user_label} está ouvindo\n\n"
+                    f"♩ {track_name} — {artist}\n\n"
+                    "∿ Leitura musical\n\n"
+                    f"☻ {mood_valence}\n"
+                    f"ϟ {mood_energy}\n"
+                    f"♫ {mood_danceability}\n\n"
+                    f"↗ tendência: {trend}\n"
+                    f"≡ baseado em {history_count} músicas analisadas"
                 )
             elif valence is not None or energy is not None or danceability is not None:
                 response_text = (
-                    f"🎹 {user_label} está ouvindo\n\n"
-                    f"🎧 {track_name} — {artist}\n\n"
-                    "🧠 Leitura musical\n\n"
-                    f"😄 {mood_valence}\n"
-                    f"⚡ {mood_energy}\n"
-                    f"🎧 {mood_danceability}\n\n"
-                    f"📈 tendência: {trend}\n"
-                    f"📊 baseado em {history_count} músicas analisadas"
+                    f"♫ {user_label} está ouvindo\n\n"
+                    f"♩ {track_name} — {artist}\n\n"
+                    "∿ Leitura musical\n\n"
+                    f"☻ {mood_valence}\n"
+                    f"ϟ {mood_energy}\n"
+                    f"♫ {mood_danceability}\n\n"
+                    f"↗ tendência: {trend}\n"
+                    f"≡ baseado em {history_count} músicas analisadas"
                 )
 
             if response_text is None:
                 response_text = (
-                    f"🎹 {user_label} está ouvindo\n\n"
-                    f"🎧 {track_name} — {artist}\n\n"
-                    "🧠 Leitura musical\n\n"
-                    f"😄 {bar(0.5)}\n"
-                    f"⚡ {bar(0.625)}\n"
-                    f"🎧 {bar(0.625)}\n\n"
-                    "📈 tendência: estável\n"
-                    "📊 baseado em poucas músicas analisadas"
+                    f"♫ {user_label} está ouvindo\n\n"
+                    f"♩ {track_name} — {artist}\n\n"
+                    "∿ Leitura musical\n\n"
+                    f"☻ {bar(0.5)}\n"
+                    f"ϟ {bar(0.625)}\n"
+                    f"♫ {bar(0.625)}\n\n"
+                    "↗ tendência: estável\n"
+                    "≡ baseado em poucas músicas analisadas"
                 )
             await message.answer(response_text)
 
