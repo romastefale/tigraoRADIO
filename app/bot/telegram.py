@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import html
 import logging
 import uuid
@@ -19,6 +20,7 @@ from aiogram.types import (
 from app.bot.intent import detect_intent
 from app.core.runtime import allow
 from app.services.likes import likes_service
+from app.services.enrichment import enrich_track_if_missing
 from app.services.spotify import spotify_service
 
 logger = logging.getLogger(__name__)
@@ -251,6 +253,7 @@ def _register_handlers(dp: Dispatcher) -> None:
             )
 
             keyboard = _playing_keyboard(track_id, total_plays, total_likes, liked)
+            asyncio.create_task(enrich_track_if_missing(track_id))
 
             album_image_url = track.get("album_image_url")
             if album_image_url:

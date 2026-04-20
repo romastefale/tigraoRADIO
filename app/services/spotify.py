@@ -254,5 +254,64 @@ class SpotifyService:
 
         return True
 
+    async def _get_app_access_token(self) -> str | None:
+        auth_str = f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}"
+        b64_auth = base64.b64encode(auth_str.encode()).decode()
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    "https://accounts.spotify.com/api/token",
+                    data={"grant_type": "client_credentials"},
+                    headers={
+                        "Authorization": f"Basic {b64_auth}",
+                        "Content-Type": "application/x-www-form-urlencoded",
+                    },
+                )
+            if response.status_code != 200:
+                logger.warning("Spotify app token request failed: %s", response.text)
+                return None
+            data = response.json()
+            token = data.get("access_token")
+            if not token:
+                logger.warning("Spotify app token missing access_token.")
+                return None
+            return str(token)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Spotify app token request error: %s", exc)
+            return None
+
+    async def get_audio_features(self, track_id: str) -> dict[str, float] | None:
+        if not track_id:
+            return None
+
+        access_token = await self._get_app_access_token()
+        if not access_token:
+            return None
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"https://api.spotify.com/v1/audio-features/{track_id}",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+            if response.status_code != 200:
+                logger.warning("Spotify audio-features request failed: %s", response.text)
+                return None
+            payload = response.json()
+            valence = payload.get("valence")
+            energy = payload.get("energy")
+            danceability = payload.get("danceability")
+            if valence is None or energy is None or danceability is None:
+                return None
+            return {
+                "valence": float(valence),
+                "energy": float(energy),
+                "danceability": float(danceability),
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Spotify audio-features request error: %s", exc)
+            return None
+
 
 spotify_service = SpotifyService()

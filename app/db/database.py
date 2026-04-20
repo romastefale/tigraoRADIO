@@ -72,6 +72,23 @@ def run_migrations(engine) -> None:
         except Exception:
             pass
 
+        try:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS track_audio_features (
+                        track_id TEXT PRIMARY KEY,
+                        valence REAL,
+                        energy REAL,
+                        danceability REAL,
+                        created_at DATETIME
+                    )
+                    """
+                )
+            )
+        except Exception:
+            pass
+
 
 # ========================
 # INIT
