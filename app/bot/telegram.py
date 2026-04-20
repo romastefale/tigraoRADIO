@@ -164,16 +164,18 @@ def _register_handlers(dp: Dispatcher) -> None:
     @dp.message(Command("start"))
     async def start(message: Message) -> None:
         start_text = (
-            "♫ Bem-vindo\n\n"
-            "Conecte sua conta e acompanhe o que você está ouvindo em tempo real.\n\n"
-            "/playing — Mostrar música atual  \n"
-            "/myself — Ver seu perfil musical  \n"
-            "/songcharts — Ver ranking do grupo  \n\n"
-            "—\n\n"
-            "/login — Conectar Spotify  \n"
-            "/logout — Desconectar conta  \n\n"
-            "—\n\n"
-            "Use os botões nas mensagens para interagir com as músicas."
+            "♫ ♥ Bem-vindo ao tigraoRADIO\n\n"
+            "Conecte sua conta e acompanhe o que você está ouvindo no Spotify.\n\n"
+            "Comandos principais:\n"
+            "/playing — mostrar música atual\n"
+            "/mood — analisar o clima da faixa atual\n"
+            "/myself — ver seu perfil musical\n"
+            "/songcharts — ver ranking do grupo\n\n"
+            "Conexão:\n"
+            "/login — conectar Spotify\n"
+            "/logout — desconectar conta\n\n"
+            "Interações:\n"
+            "Use os botões das mensagens de /playing para ver plays e curtir músicas"
         )
         if message.chat.type == "private":
             await message.answer(start_text)
@@ -184,19 +186,26 @@ def _register_handlers(dp: Dispatcher) -> None:
     @dp.message(Command("help"))
     async def help_command(message: Message) -> None:
         await message.answer(
-            "♫ Como usar\n\n"
-            "/playing — Exibe a música atual com reproduções e curtidas  \n"
-            "/myself — Mostra suas estatísticas pessoais  \n"
-            "/songcharts — Mostra o ranking de músicas e artistas  \n\n"
-            "/login — Conectar sua conta do Spotify  \n"
-            "/logout — Desconectar sua conta  \n\n"
-            "—\n\n"
-            "♫ Interações\n\n"
-            "Toque em ♫ para ver quantas vezes você ouviu a música  \n"
-            "Toque em ♡ para curtir ou remover curtida  \n\n"
-            "—\n\n"
-            "♫ Sobre\n\n"
-            "O bot registra automaticamente músicas, reproduções e curtidas, permitindo acompanhar seu histórico e o comportamento do grupo."
+            "COMANDOS\n\n"
+            "♫ /playing\n"
+            "Mostra a música que você está ouvindo agora ou a última música encontrada no Spotify.\n\n"
+            "♩ /mood\n"
+            "Analisa a faixa atual com base em humor, energia e ritmo.\n\n"
+            "★ /myself\n"
+            "Mostra seu perfil musical com top músicas, top artistas e total de curtidas.\n\n"
+            "≡ /songcharts\n"
+            "Mostra o ranking do grupo com músicas, artistas e faixas mais curtidas.\n\n"
+            "↻ /login\n"
+            "Conecte sua conta do Spotify.\n\n"
+            "⨯ /logout\n"
+            "Desconecte sua conta.\n\n"
+            "♫♩Gatilhos de texto\n"
+            "Também acionam a lógica do /playing:\n"
+            "tocando, kur, xxt, ts, cebrutius, tigraofm, djpi, royalfm, geeksfm, radinho, qap\n\n"
+            "♥♡ Interações\n"
+            "Nos posts de /playing:\n\n"
+            "* botão ♫ mostra quantas vezes você ouviu a faixa\n"
+            "* botão ♥ alterna curtida"
         )
 
     @dp.message(Command("login"))
