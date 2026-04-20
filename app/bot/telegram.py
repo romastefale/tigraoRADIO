@@ -663,6 +663,97 @@ def _register_handlers(dp: Dispatcher) -> None:
         print("SENDING RESPONSE")
         await message.answer(text)
 
+    @dp.message(Command("debuguser"))
+    async def debug_user(message: Message) -> None:
+        if not message.from_user or message.from_user.id != 8505890439:
+            return
+
+        parts = (message.text or "").split(maxsplit=1)
+        if len(parts) < 2:
+            await message.answer("Uso: /debuguser <user_id>")
+            return
+
+        raw_target_user_id = parts[1].strip()
+        try:
+            target_user_id = int(raw_target_user_id)
+        except ValueError:
+            await message.answer("user_id inválido")
+            return
+
+        with SessionLocal() as db:
+            plays_rows = db.execute(
+                text(
+                    """
+                    SELECT track_id, COUNT(*) as total
+                    FROM track_plays
+                    WHERE user_id = :uid
+                    GROUP BY track_id
+                    ORDER BY total DESC
+                    """
+                ),
+                {"uid": target_user_id},
+            ).all()
+
+            total_plays = db.execute(
+                text(
+                    """
+                    SELECT COUNT(*)
+                    FROM track_plays
+                    WHERE user_id = :uid
+                    """
+                ),
+                {"uid": target_user_id},
+            ).scalar() or 0
+
+            likes_rows = db.execute(
+                text(
+                    """
+                    SELECT track_id, COALESCE(liked, 1) as liked
+                    FROM track_likes
+                    WHERE user_id = :uid
+                    """
+                ),
+                {"uid": target_user_id},
+            ).all()
+
+            total_likes = db.execute(
+                text(
+                    """
+                    SELECT COUNT(*)
+                    FROM track_likes
+                    WHERE user_id = :uid
+                    AND COALESCE(liked, 1) = 1
+                    """
+                ),
+                {"uid": target_user_id},
+            ).scalar() or 0
+
+        top_plays_lines = [
+            f"{row.track_id} → {row.total}"
+            for row in plays_rows[:10]
+        ]
+        if not top_plays_lines:
+            top_plays_lines = ["(sem dados)"]
+
+        likes_lines = [
+            f"{row.track_id} → {'♥' if int(row.liked or 0) == 1 else '♡'}"
+            for row in likes_rows[:10]
+        ]
+        if not likes_lines:
+            likes_lines = ["(sem dados)"]
+
+        response = (
+            "DEBUG USER\n\n"
+            f"user_id: {target_user_id}\n"
+            f"total_plays: {total_plays}\n"
+            f"total_likes: {total_likes}\n\n"
+            "TOP PLAYS:\n"
+            f"{chr(10).join(top_plays_lines)}\n\n"
+            "LIKES:\n"
+            f"{chr(10).join(likes_lines)}"
+        )
+        await message.answer(response)
+
     @dp.message(Command("logout"))
     async def logout(message: Message) -> None:
         user_id = message.from_user.id if message.from_user else 0
