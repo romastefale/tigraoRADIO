@@ -343,23 +343,9 @@ def _register_handlers(dp: Dispatcher) -> None:
                     parse_mode="HTML",
                     reply_markup=keyboard,
                 )
-                with SessionLocal() as db:
-                    exists = db.execute(
-                        text("SELECT 1 FROM track_audio_features WHERE track_id = :track_id"),
-                        {"track_id": track_id},
-                    ).first()
-                if not exists:
-                    await enrich_track_if_missing(track_id, user_id)
                 return
 
             await message.answer(caption, parse_mode="HTML", reply_markup=keyboard)
-            with SessionLocal() as db:
-                exists = db.execute(
-                    text("SELECT 1 FROM track_audio_features WHERE track_id = :track_id"),
-                    {"track_id": track_id},
-                ).first()
-            if not exists:
-                await enrich_track_if_missing(track_id, user_id)
 
         except Exception as exc:
             await _handle_spotify_error(message, exc)
