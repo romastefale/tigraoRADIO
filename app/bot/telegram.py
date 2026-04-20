@@ -295,23 +295,80 @@ def _register_handlers(dp: Dispatcher) -> None:
             valence = None
             energy = None
             danceability = None
+            history_count = 0
+            trend = "estável"
             with SessionLocal() as db:
-                row = db.execute(
+                history_rows = db.execute(
                     text(
                         """
-                        SELECT valence, energy, danceability
-                        FROM track_audio_features
-                        WHERE track_id = :track_id
+                        SELECT track_id
+                        FROM track_plays
+                        WHERE user_id = :user_id
+                        ORDER BY played_at DESC
+                        LIMIT 20
                         """
                     ),
-                    {"track_id": track_id},
-                ).first()
+                    {"user_id": user_id},
+                ).all()
+                history_count = len(history_rows)
 
-            if row:
-                valence, energy, danceability = row
-            else:
-                if track_id:
-                    asyncio.create_task(enrich_track_if_missing(track_id))
+                enriched_rows = db.execute(
+                    text(
+                        """
+                        SELECT t.track_id, f.valence, f.energy, f.danceability
+                        FROM track_plays t
+                        JOIN track_audio_features f ON t.track_id = f.track_id
+                        WHERE t.user_id = :user_id
+                        ORDER BY t.played_at DESC
+                        LIMIT 20
+                        """
+                    ),
+                    {"user_id": user_id},
+                ).all()
+
+                valid_rows = [
+                    row
+                    for row in enriched_rows
+                    if row.valence is not None
+                    and row.energy is not None
+                    and row.danceability is not None
+                ]
+
+                if len(valid_rows) >= 3:
+                    valence = sum(float(row.valence) for row in valid_rows) / len(valid_rows)
+                    energy = sum(float(row.energy) for row in valid_rows) / len(valid_rows)
+                    danceability = sum(float(row.danceability) for row in valid_rows) / len(valid_rows)
+
+                    recent_energy = [float(row.energy) for row in valid_rows[:3]]
+                    baseline_energy = [float(row.energy) for row in valid_rows[3:]]
+                    threshold = 0.05
+
+                    if baseline_energy:
+                        recent_avg = sum(recent_energy) / len(recent_energy)
+                        baseline_avg = sum(baseline_energy) / len(baseline_energy)
+                        if recent_avg > baseline_avg + threshold:
+                            trend = "subindo"
+                        elif recent_avg < baseline_avg - threshold:
+                            trend = "caindo"
+                else:
+                    row = db.execute(
+                        text(
+                            """
+                            SELECT valence, energy, danceability
+                            FROM track_audio_features
+                            WHERE track_id = :track_id
+                            """
+                        ),
+                        {"track_id": track_id},
+                    ).first()
+
+                    if row:
+                        valence, energy, danceability = row
+                    elif track_id:
+                        asyncio.create_task(enrich_track_if_missing(track_id))
+
+            if valence is None and energy is None and danceability is None and track_id:
+                asyncio.create_task(enrich_track_if_missing(track_id))
 
             track_name = _normalize_optional_text(track.get("track_name")) or "Desconhecida"
             artist = _normalize_optional_text(track.get("artist")) or "Desconhecido"
@@ -335,7 +392,8 @@ def _register_handlers(dp: Dispatcher) -> None:
                 f"😄 {mood_valence}\n"
                 f"⚡ {mood_energy}\n"
                 f"🎧 {mood_danceability}\n\n"
-                "📈 tendência: estável"
+                f"📈 tendência: {trend}\n"
+                f"📊 baseado nas últimas {history_count} músicas"
             )
             await message.answer(text)
 
