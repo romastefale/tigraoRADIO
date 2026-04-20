@@ -61,21 +61,34 @@ class LikesService:
 
     async def is_track_liked(self, user_id: int, track_id: str) -> bool:
         with self._new_session() as db:
-            stmt = select(TrackLike.id).where(
-                TrackLike.user_id == user_id,
-                TrackLike.track_id == track_id,
+            has_liked_flag = self._table_has_column(db, "track_likes", "liked")
+            stmt = (
+                select(TrackLike.id)
+                .where(
+                    TrackLike.user_id == user_id,
+                    TrackLike.track_id == track_id,
+                )
+                .limit(1)
             )
+            if has_liked_flag:
+                stmt = stmt.where(func.coalesce(TrackLike.liked, 1) == 1)
             return db.execute(stmt).first() is not None
 
     async def get_total_likes(self, track_id: str) -> int:
         with self._new_session() as db:
+            has_liked_flag = self._table_has_column(db, "track_likes", "liked")
             stmt = select(func.count(TrackLike.id)).where(TrackLike.track_id == track_id)
+            if has_liked_flag:
+                stmt = stmt.where(func.coalesce(TrackLike.liked, 1) == 1)
             result = db.execute(stmt).scalar_one()
             return int(result)
 
     async def get_user_total_likes(self, user_id: int) -> int:
         with self._new_session() as db:
+            has_liked_flag = self._table_has_column(db, "track_likes", "liked")
             stmt = select(func.count(TrackLike.id)).where(TrackLike.user_id == user_id)
+            if has_liked_flag:
+                stmt = stmt.where(func.coalesce(TrackLike.liked, 1) == 1)
             result = db.execute(stmt).scalar_one()
             return int(result)
 
@@ -188,7 +201,7 @@ class LikesService:
         with self._new_session() as db:
             has_track_name = self._table_has_column(db, "track_plays", "track_name")
             has_liked_flag = self._table_has_column(db, "track_likes", "liked")
-            liked_filter = "WHERE liked = 1" if has_liked_flag else ""
+            liked_filter = "WHERE COALESCE(liked, 1) = 1" if has_liked_flag else ""
             track_label = "COALESCE(MAX(tp.track_name), likes.track_id)" if has_track_name else "likes.track_id"
             stmt = text(
                 f"""
@@ -226,9 +239,10 @@ class LikesService:
                 )
                 existing = db.execute(stmt).scalar_one_or_none()
                 if existing:
-                    db.delete(existing)
+                    current_liked = 1 if existing.liked is None else int(existing.liked)
+                    existing.liked = 0 if current_liked == 1 else 1
                     db.commit()
-                    return False
+                    return bool(existing.liked == 1)
 
                 normalized_track_name = self._normalize_optional_text(track_name)
                 normalized_artist_name = self._normalize_optional_text(artist_name)
