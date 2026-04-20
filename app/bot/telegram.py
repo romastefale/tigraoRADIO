@@ -215,12 +215,10 @@ def _register_handlers(dp: Dispatcher) -> None:
         artist = str(track.get("artist") or "")
         caption = (
             f"♫ {track_name} — {artist}\n\n"
-            "♩ Mood\n\n"
             f"☻ {bar(valence)}  humor\n"
             f"ϟ {bar(energy)}  energia\n"
             f"✶ {bar(danceability)}  ritmo\n\n"
-            f"≡ {diagnostic}\n"
-            f"↗ {trend}"
+            f"≡ {diagnostic}"
         )
 
         result = InlineQueryResultPhoto(
@@ -508,12 +506,10 @@ def _register_handlers(dp: Dispatcher) -> None:
             caption = (
                 f"{safe_name} · ♥ {score}\n"
                 f"♫ {safe_track} — {safe_artist}\n\n"
-                "♩ Mood\n\n"
                 f"☻ {bar(valence)}  humor\n"
                 f"ϟ {bar(energy)}  energia\n"
                 f"✶ {bar(danceability)}  ritmo\n\n"
-                f"≡ {diagnostic}\n"
-                f"↗ {trend}"
+                f"≡ {diagnostic}"
             )
 
             album_image_url = track.get("album_image_url")
