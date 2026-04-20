@@ -322,7 +322,12 @@ class SpotifyService:
             return None
 
         if response.status_code != 200:
-            logger.error("Spotify audio features request failed for %s: %s", normalized_track_id, response.text)
+            logger.error(
+                "AUDIO_FEATURES_FAIL track_id=%s status=%s body=%s",
+                normalized_track_id,
+                response.status_code,
+                response.text,
+            )
             return None
 
         data = response.json()
