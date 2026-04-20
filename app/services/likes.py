@@ -59,9 +59,10 @@ class LikesService:
             result = db.execute(stmt).scalar_one()
             return int(result)
 
-    async def is_track_liked(self, user_id: int, track_id: str) -> bool:
+    async def is_track_liked(self, user_id: int, track_id: str, owner_user_id: int | None = None) -> bool:
         with self._new_session() as db:
             has_liked_flag = self._table_has_column(db, "track_likes", "liked")
+            has_owner_user_id = self._table_has_column(db, "track_likes", "owner_user_id")
             stmt = (
                 select(TrackLike.id)
                 .where(
@@ -70,14 +71,19 @@ class LikesService:
                 )
                 .limit(1)
             )
+            if has_owner_user_id:
+                stmt = stmt.where(TrackLike.owner_user_id == owner_user_id)
             if has_liked_flag:
                 stmt = stmt.where(func.coalesce(TrackLike.liked, 1) == 1)
             return db.execute(stmt).first() is not None
 
-    async def get_total_likes(self, track_id: str) -> int:
+    async def get_total_likes(self, track_id: str, owner_user_id: int | None = None) -> int:
         with self._new_session() as db:
             has_liked_flag = self._table_has_column(db, "track_likes", "liked")
+            has_owner_user_id = self._table_has_column(db, "track_likes", "owner_user_id")
             stmt = select(func.count(TrackLike.id)).where(TrackLike.track_id == track_id)
+            if has_owner_user_id:
+                stmt = stmt.where(TrackLike.owner_user_id == owner_user_id)
             if has_liked_flag:
                 stmt = stmt.where(func.coalesce(TrackLike.liked, 1) == 1)
             result = db.execute(stmt).scalar_one()
@@ -87,6 +93,18 @@ class LikesService:
         with self._new_session() as db:
             has_liked_flag = self._table_has_column(db, "track_likes", "liked")
             stmt = select(func.count(TrackLike.id)).where(TrackLike.user_id == user_id)
+            if has_liked_flag:
+                stmt = stmt.where(func.coalesce(TrackLike.liked, 1) == 1)
+            result = db.execute(stmt).scalar_one()
+            return int(result)
+
+    async def get_user_received_likes(self, user_id: int) -> int:
+        with self._new_session() as db:
+            has_liked_flag = self._table_has_column(db, "track_likes", "liked")
+            has_owner_user_id = self._table_has_column(db, "track_likes", "owner_user_id")
+            if not has_owner_user_id:
+                return 0
+            stmt = select(func.count(TrackLike.id)).where(TrackLike.owner_user_id == user_id)
             if has_liked_flag:
                 stmt = stmt.where(func.coalesce(TrackLike.liked, 1) == 1)
             result = db.execute(stmt).scalar_one()
@@ -227,16 +245,20 @@ class LikesService:
     async def toggle_track_like(
         self,
         user_id: int,
+        owner_user_id: int | None,
         track_id: str,
         track_name: str | None = None,
         artist_name: str | None = None,
     ) -> bool:
         with self._new_session() as db:
             try:
+                has_owner_user_id = self._table_has_column(db, "track_likes", "owner_user_id")
                 stmt = select(TrackLike).where(
                     TrackLike.user_id == user_id,
                     TrackLike.track_id == track_id,
                 )
+                if has_owner_user_id:
+                    stmt = stmt.where(TrackLike.owner_user_id == owner_user_id)
                 existing = db.execute(stmt).scalar_one_or_none()
                 if existing:
                     current_liked = 1 if existing.liked is None else int(existing.liked)
@@ -264,6 +286,7 @@ class LikesService:
                 db.add(
                     TrackLike(
                         user_id=user_id,
+                        owner_user_id=owner_user_id if has_owner_user_id else None,
                         track_id=track_id,
                         track_name=normalized_track_name,
                         artist_name=normalized_artist_name,
@@ -275,7 +298,7 @@ class LikesService:
             except IntegrityError:
                 db.rollback()
 
-        return await self.is_track_liked(user_id, track_id)
+        return await self.is_track_liked(user_id, track_id, owner_user_id=owner_user_id)
 
 
 likes_service = LikesService()
