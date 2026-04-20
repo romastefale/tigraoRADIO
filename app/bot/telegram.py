@@ -278,7 +278,7 @@ def _register_handlers(dp: Dispatcher) -> None:
     @dp.message(Command("mood"))
     async def mood(message: Message) -> None:
         user_id = message.from_user.id if message.from_user else 0
-        text = None
+        response_text = None
 
         def bar(value: float) -> str:
             filled = int(max(0, min(1, value)) * 8)
@@ -384,7 +384,7 @@ def _register_handlers(dp: Dispatcher) -> None:
             mood_danceability = bar(float(danceability)) if danceability is not None else bar(0.625)
 
             if valence is not None and energy is not None:
-                text = (
+                response_text = (
                     f"🎹 {user_label} está ouvindo\n"
                     f"🏅 nível: {rank}\n\n"
                     f"🎧 {track_name} — {artist}\n\n"
@@ -396,7 +396,7 @@ def _register_handlers(dp: Dispatcher) -> None:
                     f"📊 baseado em {history_count} músicas analisadas"
                 )
             elif valence is not None or energy is not None or danceability is not None:
-                text = (
+                response_text = (
                     f"🎹 {user_label} está ouvindo\n\n"
                     f"🎧 {track_name} — {artist}\n\n"
                     "🧠 Leitura musical\n\n"
@@ -407,8 +407,8 @@ def _register_handlers(dp: Dispatcher) -> None:
                     f"📊 baseado em {history_count} músicas analisadas"
                 )
 
-            if text is None:
-                text = (
+            if response_text is None:
+                response_text = (
                     f"🎹 {user_label} está ouvindo\n\n"
                     f"🎧 {track_name} — {artist}\n\n"
                     "🧠 Leitura musical\n\n"
@@ -418,7 +418,7 @@ def _register_handlers(dp: Dispatcher) -> None:
                     "📈 tendência: estável\n"
                     "📊 baseado em poucas músicas analisadas"
                 )
-            await message.answer(text)
+            await message.answer(response_text)
 
         except Exception as exc:
             await _handle_spotify_error(message, exc)
