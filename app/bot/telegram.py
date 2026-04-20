@@ -140,20 +140,13 @@ def _register_handlers(dp: Dispatcher) -> None:
             return
 
         if text == "p":
-            status_line = _format_play_status(track, query.from_user.full_name)
-            caption = _play_caption(
-                status_line=status_line,
-                spotify_url=track.get("spotify_url"),
-                track_name=str(track.get("track_name") or ""),
-                artist=str(track.get("artist") or ""),
-            )
+            caption = f"♫ {str(track.get('track_name') or '')} — {str(track.get('artist') or '')}"
 
             result = InlineQueryResultPhoto(
                 id=str(uuid.uuid4()),
                 photo_url=album_image_url,
                 thumbnail_url=album_image_url,
                 caption=caption,
-                parse_mode="HTML",
             )
 
             await query.answer([result], cache_time=1)
