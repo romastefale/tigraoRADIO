@@ -490,6 +490,7 @@ def _register_handlers(dp: Dispatcher) -> None:
                         valence, energy, danceability = row
 
             if valence is None and energy is None and danceability is None and track_id:
+                logger.info("ENRICH_TRIGGER track_id=%s", track_id)
                 asyncio.create_task(enrich_track_if_missing(track_id))
 
             valence = float(valence) if valence is not None else 0.5
