@@ -268,6 +268,46 @@ def _register_handlers(dp: Dispatcher) -> None:
             await _handle_spotify_error(message, exc)
 
 
+
+    @dp.message(Command("mood"))
+    async def mood(message: Message) -> None:
+        user_id = message.from_user.id if message.from_user else 0
+
+        def bar(value: int) -> str:
+            bounded = max(0, min(8, value))
+            return "▰" * bounded + "▱" * (8 - bounded)
+
+        try:
+            track = await spotify_service.get_current_or_last_played(user_id)
+            if not track:
+                await message.answer("Nada está tocando agora.")
+                return
+
+            track_name = _normalize_optional_text(track.get("track_name")) or "Desconhecida"
+            artist = _normalize_optional_text(track.get("artist")) or "Desconhecido"
+
+            username = message.from_user.username if message.from_user else None
+            if username:
+                user_label = f"@{username}"
+            elif message.from_user:
+                user_label = message.from_user.full_name
+            else:
+                user_label = "@unknown"
+
+            text = (
+                f"🎹 {user_label} está ouvindo\n\n"
+                f"🎧 {track_name} — {artist}\n\n"
+                "🧠 Leitura musical\n\n"
+                f"😄 {bar(4)}\n"
+                f"⚡ {bar(5)}\n"
+                f"🎧 {bar(5)}\n\n"
+                "📈 tendência: estável"
+            )
+            await message.answer(text)
+
+        except Exception as exc:
+            await _handle_spotify_error(message, exc)
+
     @dp.message(Command("myself"))
     async def handle_myself(message: Message):
         print("MYSELF HANDLER HIT")
