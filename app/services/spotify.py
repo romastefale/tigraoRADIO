@@ -302,12 +302,17 @@ class SpotifyService:
 
         return True
 
-    async def get_audio_features(self, track_id: str) -> dict[str, float] | None:
+    async def get_audio_features(self, track_id: str, user_id: int) -> dict[str, float] | None:
         normalized_track_id = track_id.strip() if isinstance(track_id, str) else ""
         if not normalized_track_id:
             return None
 
-        access_token = await self._get_app_access_token()
+        with SessionLocal() as db:
+            token = db.query(SpotifyToken).filter_by(user_id=user_id).first()
+        if not token or not token.access_token:
+            return None
+
+        access_token = token.access_token
         if not access_token:
             return None
 
