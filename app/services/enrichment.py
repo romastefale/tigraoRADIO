@@ -11,7 +11,7 @@ from app.services.spotify import spotify_service
 logger = logging.getLogger(__name__)
 
 
-async def enrich_track_if_missing(track_id: str) -> None:
+async def enrich_track_if_missing(track_id: str, user_id: int) -> None:
     normalized_track_id = track_id.strip() if isinstance(track_id, str) else ""
     if not normalized_track_id:
         return
@@ -19,7 +19,7 @@ async def enrich_track_if_missing(track_id: str) -> None:
     logger.info("ENRICH_START track_id=%s", normalized_track_id)
 
     try:
-        features = await spotify_service.get_audio_features(normalized_track_id)
+        features = await spotify_service.get_audio_features(normalized_track_id, user_id)
         logger.info("ENRICH_FEATURES track_id=%s data=%s", normalized_track_id, features)
         if features is None:
             logger.error("ENRICH_NO_DATA track_id=%s", normalized_track_id)

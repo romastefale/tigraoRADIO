@@ -1,5 +1,4 @@
 from __future__ import annotations
-import asyncio
 import html
 import logging
 import random
@@ -346,11 +345,23 @@ def _register_handlers(dp: Dispatcher) -> None:
                     parse_mode="HTML",
                     reply_markup=keyboard,
                 )
-                asyncio.create_task(enrich_track_if_missing(track_id))
+                with SessionLocal() as db:
+                    exists = db.execute(
+                        text("SELECT 1 FROM track_audio_features WHERE track_id = :track_id"),
+                        {"track_id": track_id},
+                    ).first()
+                if not exists:
+                    await enrich_track_if_missing(track_id, user_id)
                 return
 
             await message.answer(caption, parse_mode="HTML", reply_markup=keyboard)
-            asyncio.create_task(enrich_track_if_missing(track_id))
+            with SessionLocal() as db:
+                exists = db.execute(
+                    text("SELECT 1 FROM track_audio_features WHERE track_id = :track_id"),
+                    {"track_id": track_id},
+                ).first()
+            if not exists:
+                await enrich_track_if_missing(track_id, user_id)
 
         except Exception as exc:
             await _handle_spotify_error(message, exc)
@@ -491,7 +502,13 @@ def _register_handlers(dp: Dispatcher) -> None:
 
             if valence is None and energy is None and danceability is None and track_id:
                 logger.info("ENRICH_TRIGGER track_id=%s", track_id)
-                asyncio.create_task(enrich_track_if_missing(track_id))
+                with SessionLocal() as db:
+                    exists = db.execute(
+                        text("SELECT 1 FROM track_audio_features WHERE track_id = :track_id"),
+                        {"track_id": track_id},
+                    ).first()
+                if not exists:
+                    await enrich_track_if_missing(track_id, user_id)
 
             valence = float(valence) if valence is not None else 0.5
             energy = float(energy) if energy is not None else 0.5
