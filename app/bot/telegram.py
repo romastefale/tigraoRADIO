@@ -136,16 +136,14 @@ def _register_handlers(dp: Dispatcher) -> None:
         if not track:
             return
 
-        album_image_url = track.get("album_image_url")
-        if not album_image_url:
-            return
+        album_image_url = track.get("album_image_url") or "https://via.placeholder.com/512"
 
         if text == "playing":
             track_id = _normalize_optional_text(track.get("track_id"))
             if not track_id:
-                return
+                track_id = "unknown"
 
-            display_name = query.from_user.full_name
+            display_name = (query.from_user.full_name or "Usuário").strip()
             plays = await likes_service.get_user_track_plays(user_id, track_id)
             track_name = str(track.get("track_name") or "")
             artist = str(track.get("artist") or "")
@@ -161,7 +159,7 @@ def _register_handlers(dp: Dispatcher) -> None:
                 caption=caption,
             )
 
-            await query.answer([result], cache_time=1)
+            await query.answer([result], cache_time=5)
             return
 
         def bar(value: float) -> str:
@@ -228,7 +226,7 @@ def _register_handlers(dp: Dispatcher) -> None:
             caption=caption,
         )
 
-        await query.answer([result], cache_time=1)
+        await query.answer([result], cache_time=5)
 
     # ========================
     # COMMANDS
