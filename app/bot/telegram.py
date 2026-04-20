@@ -149,20 +149,12 @@ def _register_handlers(dp: Dispatcher) -> None:
         if not track:
             return
 
-        track_id = track.get("track_id")
         track_name = str(track.get("track_name") or "")
         artist = str(track.get("artist") or "")
         display_name = query.from_user.full_name or "Usuário"
-        if track_id:
-            await likes_service.register_play(user_id, track_id)
-        if track_id:
-            plays = await likes_service.get_user_track_plays(user_id, track_id)
-        else:
-            plays = 0
         album_image_url = track.get("album_image_url") or "https://via.placeholder.com/512"
         caption = (
-            f"{display_name} · ♪ {plays}\n"
-            f"♫ {track_name} — {artist}"
+            f"<b><i>♫ {display_name} está ouvindo {track_name} — {artist}</i></b>"
         )
 
         result = InlineQueryResultPhoto(
@@ -170,9 +162,10 @@ def _register_handlers(dp: Dispatcher) -> None:
             photo_url=album_image_url,
             thumbnail_url=album_image_url,
             caption=caption,
+            parse_mode="HTML",
         )
 
-        await query.answer([result], cache_time=3)
+        await query.answer([result], cache_time=2)
 
     # ========================
     # COMMANDS
