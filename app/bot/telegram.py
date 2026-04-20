@@ -140,7 +140,18 @@ def _register_handlers(dp: Dispatcher) -> None:
             return
 
         if text == "p":
-            caption = f"♫ {str(track.get('track_name') or '')} — {str(track.get('artist') or '')}"
+            track_id = _normalize_optional_text(track.get("track_id"))
+            if not track_id:
+                return
+
+            display_name = query.from_user.full_name
+            plays = await likes_service.get_user_track_plays(user_id, track_id)
+            track_name = str(track.get("track_name") or "")
+            artist = str(track.get("artist") or "")
+            caption = (
+                f"{display_name} · ♪ {plays}\n"
+                f"♫ {track_name} — {artist}"
+            )
 
             result = InlineQueryResultPhoto(
                 id=str(uuid.uuid4()),
