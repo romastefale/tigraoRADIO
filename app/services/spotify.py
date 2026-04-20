@@ -31,6 +31,36 @@ class SpotifyService:
     async def shutdown(self) -> None:
         logger.info("Spotify service stopped.")
 
+    async def _get_app_access_token(self) -> str | None:
+        auth_str = f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}"
+        b64_auth = base64.b64encode(auth_str.encode()).decode()
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    "https://accounts.spotify.com/api/token",
+                    data={"grant_type": "client_credentials"},
+                    headers={
+                        "Authorization": f"Basic {b64_auth}",
+                        "Content-Type": "application/x-www-form-urlencoded",
+                    },
+                )
+        except Exception:
+            logger.exception("Failed to request Spotify app access token")
+            return None
+
+        if response.status_code != 200:
+            logger.error("Spotify app token request failed: %s", response.text)
+            return None
+
+        data = response.json()
+        access_token = data.get("access_token")
+        if not access_token:
+            logger.error("Spotify app token response missing access_token: %s", data)
+            return None
+
+        return str(access_token)
+
     def build_auth_url(self, user_id: int) -> str:
         return (
             "https://accounts.spotify.com/authorize"
@@ -253,6 +283,40 @@ class SpotifyService:
                 db.commit()
 
         return True
+
+    async def get_audio_features(self, track_id: str) -> dict[str, float] | None:
+        normalized_track_id = track_id.strip() if isinstance(track_id, str) else ""
+        if not normalized_track_id:
+            return None
+
+        access_token = await self._get_app_access_token()
+        if not access_token:
+            return None
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"https://api.spotify.com/v1/audio-features/{normalized_track_id}",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+        except Exception:
+            logger.exception("Failed to request audio features for track_id=%s", normalized_track_id)
+            return None
+
+        if response.status_code != 200:
+            logger.error("Spotify audio features request failed for %s: %s", normalized_track_id, response.text)
+            return None
+
+        data = response.json()
+        try:
+            return {
+                "valence": float(data["valence"]),
+                "energy": float(data["energy"]),
+                "danceability": float(data["danceability"]),
+            }
+        except (KeyError, TypeError, ValueError):
+            logger.error("Spotify audio features payload invalid for %s: %s", normalized_track_id, data)
+            return None
 
 
 spotify_service = SpotifyService()
