@@ -462,6 +462,9 @@ def _register_handlers(dp: Dispatcher) -> None:
     async def handle_myself(message: Message):
         print("MYSELF HANDLER HIT")
         user_id = message.from_user.id
+        display_name = message.from_user.full_name if message.from_user else "Usuário"
+        safe_name = html.escape(display_name)
+        header = f"<a href='tg://user?id={user_id}'>{safe_name}</a> · ♥ {{likes}} curtidas"
 
         print("CALLING SERVICE")
         total_likes = await likes_service.get_user_total_likes(user_id)
@@ -470,8 +473,9 @@ def _register_handlers(dp: Dispatcher) -> None:
 
         if not top_tracks and not top_artists and total_likes == 0:
             await message.answer(
-                "♫ Seu perfil\n\n"
-                "Nenhum dado disponível ainda."
+                f"{header.format(likes=total_likes)}\n\n"
+                "Nenhum dado disponível ainda.",
+                parse_mode="HTML",
             )
             return
 
@@ -487,13 +491,12 @@ def _register_handlers(dp: Dispatcher) -> None:
         tracks_block = "\n".join(tracks_lines)
         artists_block = "\n".join(artists_lines)
         text = (
-            "♫ Seu perfil\n\n"
+            f"{header.format(likes=total_likes)}\n\n"
             f"{tracks_block}\n\n"
-            f"{artists_block}\n\n"
-            f"♥ Curtidas — {total_likes}"
+            f"{artists_block}"
         )
         print("SENDING RESPONSE")
-        await message.answer(text)
+        await message.answer(text, parse_mode="HTML")
 
     @dp.message(Command("songcharts"))
     async def handle_songcharts(message: Message):
