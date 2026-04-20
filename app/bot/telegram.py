@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import random
 import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -278,11 +279,10 @@ def _register_handlers(dp: Dispatcher) -> None:
     @dp.message(Command("mood"))
     async def mood(message: Message) -> None:
         user_id = message.from_user.id if message.from_user else 0
-        response_text = None
 
         def bar(value: float) -> str:
-            filled = int(max(0, min(1, value)) * 8)
-            return "▰" * filled + "▱" * (8 - filled)
+            filled = max(1, int(max(0, min(1, value)) * 5))
+            return "▰" * filled + "▱" * (5 - filled)
 
         try:
             track = await spotify_service.get_current_or_last_played(user_id)
@@ -355,69 +355,76 @@ def _register_handlers(dp: Dispatcher) -> None:
             if valence is None and energy is None and danceability is None and track_id:
                 asyncio.create_task(enrich_track_if_missing(track_id))
 
+            valence = float(valence) if valence is not None else 0.5
+            energy = float(energy) if energy is not None else 0.5
+            danceability = float(danceability) if danceability is not None else 0.5
+
+            display_name = message.from_user.full_name if message.from_user else "Usuário"
             track_name = _normalize_optional_text(track.get("track_name")) or "Desconhecida"
             artist = _normalize_optional_text(track.get("artist")) or "Desconhecido"
 
-            username = message.from_user.username if message.from_user else None
-            if username:
-                user_label = f"@{username}"
-            elif message.from_user:
-                user_label = message.from_user.full_name
+            safe_name = html.escape(display_name)
+            safe_track = html.escape(track_name)
+            safe_artist = html.escape(artist)
+
+            user_link = f"{safe_name}"
+            score = await likes_service.get_user_total_likes(user_id)
+
+            if valence >= 0.75:
+                diagnostic = random.choice(
+                    [
+                        "Acho que {user} está muito feliz!",
+                        "Acho que {user} está em ótima vibe!",
+                        "Acho que {user} está radiante!",
+                    ]
+                )
+            elif valence >= 0.55:
+                diagnostic = random.choice(
+                    [
+                        "Acho que {user} está bem!",
+                        "Acho que {user} está de boa!",
+                        "Acho que {user} está numa boa vibe!",
+                    ]
+                )
+            elif valence >= 0.40:
+                diagnostic = random.choice(
+                    [
+                        "Acho que {user} está estável.",
+                        "Acho que {user} está equilibrado.",
+                    ]
+                )
+            elif valence >= 0.25:
+                diagnostic = random.choice(
+                    [
+                        "Acho que {user} está pensativo.",
+                        "Acho que {user} está mais na dele.",
+                    ]
+                )
             else:
-                user_label = "@unknown"
-
-            ranking_energy = float(energy) if energy is not None else 0.5
-            if valence is not None and energy is not None:
-                ranking_energy = (float(energy) * 0.7) + (float(valence) * 0.3)
-
-            if ranking_energy >= 0.75:
-                rank = "🔥 muito alto"
-            elif ranking_energy >= 0.55:
-                rank = "⚡ alto"
-            elif ranking_energy >= 0.35:
-                rank = "🔹 médio"
-            else:
-                rank = "🌙 baixo"
-
-            mood_valence = bar(float(valence)) if valence is not None else bar(0.5)
-            mood_energy = bar(float(energy)) if energy is not None else bar(0.625)
-            mood_danceability = bar(float(danceability)) if danceability is not None else bar(0.625)
-
-            if valence is not None and energy is not None:
-                response_text = (
-                    f"♫ {user_label} está ouvindo\n\n"
-                    f"♩ {track_name} — {artist}\n\n"
-                    "∿ Leitura musical\n\n"
-                    f"☻ {mood_valence}\n"
-                    f"ϟ {mood_energy}\n"
-                    f"♫ {mood_danceability}\n\n"
-                    f"↗ tendência: {trend}\n"
-                    f"≡ baseado em {history_count} músicas analisadas"
-                )
-            elif valence is not None or energy is not None or danceability is not None:
-                response_text = (
-                    f"♫ {user_label} está ouvindo\n\n"
-                    f"♩ {track_name} — {artist}\n\n"
-                    "∿ Leitura musical\n\n"
-                    f"☻ {mood_valence}\n"
-                    f"ϟ {mood_energy}\n"
-                    f"♫ {mood_danceability}\n\n"
-                    f"↗ tendência: {trend}\n"
-                    f"≡ baseado em {history_count} músicas analisadas"
+                diagnostic = random.choice(
+                    [
+                        "Acho que {user} está introspectivo.",
+                        "Acho que {user} está reflexivo.",
+                    ]
                 )
 
-            if response_text is None:
-                response_text = (
-                    f"♫ {user_label} está ouvindo\n\n"
-                    f"♩ {track_name} — {artist}\n\n"
-                    "∿ Leitura musical\n\n"
-                    f"☻ {bar(0.5)}\n"
-                    f"ϟ {bar(0.625)}\n"
-                    f"♫ {bar(0.625)}\n\n"
-                    "↗ tendência: estável\n"
-                    "≡ baseado em poucas músicas analisadas"
-                )
-            await message.answer(response_text)
+            diagnostic = diagnostic.format(user=user_link)
+
+            caption = (
+                f"{safe_name} · ♥ {score}\n"
+                f"♫ {safe_track} — {safe_artist}\n\n"
+                "♩ Mood\n\n"
+                f"☻ {bar(valence)}  humor\n"
+                f"ϟ {bar(energy)}  energia\n"
+                f"✶ {bar(danceability)}  ritmo\n\n"
+                f"≡ {diagnostic}\n"
+                f"↗ {trend}"
+            )
+
+            if history_count < 3:
+                caption += "\nℹ baseado em poucas músicas analisadas"
+
+            await message.answer(caption)
 
         except Exception as exc:
             await _handle_spotify_error(message, exc)
