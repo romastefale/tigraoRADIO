@@ -335,7 +335,7 @@ def _register_handlers(dp: Dispatcher) -> None:
             display_name = html.escape(display_name)
 
             caption = (
-                f"<b><a href=\"{html.escape(user_link)}\">{display_name}</a></b> está ouvindo · ♥ <code>{user_total_likes}</code>\n\n"
+                f"<b><a href=\"{html.escape(user_link)}\">{display_name}</a></b> · ♥ <code>{user_total_likes}</code>\n\n"
                 f"♫ <b><a href=\"{html.escape(track_url)}\">{track_name}</a></b> — <i>{artist_name}</i>"
             )
 
