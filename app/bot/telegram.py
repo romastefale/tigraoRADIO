@@ -361,6 +361,18 @@ def _register_handlers(dp: Dispatcher) -> None:
     async def kingplay(message: Message) -> None:
         user_id = message.from_user.id if message.from_user else 0
         try:
+            target_chat_id = message.chat.id
+            if message.chat.type == "private":
+                parts = (message.text or "").split(maxsplit=1)
+                if len(parts) < 2:
+                    await message.answer("Uso: /kingplay <chat_id>")
+                    return
+                target_chat_id = int(parts[1].strip())
+                chat = await message.bot.get_chat(target_chat_id)
+                group_name_raw = _normalize_optional_text(chat.title)
+            else:
+                group_name_raw = _normalize_optional_text(message.chat.title)
+
             track = await spotify_service.get_current_or_last_played(user_id)
             if not track:
                 await message.answer("Nada está tocando agora.")
@@ -368,7 +380,6 @@ def _register_handlers(dp: Dispatcher) -> None:
 
             track_name_raw = _normalize_optional_text(track.get("track_name"))
             artist_name_raw = _normalize_optional_text(track.get("artist"))
-            group_name_raw = _normalize_optional_text(message.chat.title)
 
             track_name = html.escape(track_name_raw or "")
             artist_name = html.escape(artist_name_raw or "")
@@ -378,16 +389,21 @@ def _register_handlers(dp: Dispatcher) -> None:
 
             album_image_url = track.get("album_image_url")
             if album_image_url:
-                sent = await message.answer_photo(
+                sent = await message.bot.send_photo(
+                    chat_id=target_chat_id,
                     photo=str(album_image_url),
                     caption=caption,
                     parse_mode="HTML",
                 )
             else:
-                sent = await message.answer(caption, parse_mode="HTML")
+                sent = await message.bot.send_message(
+                    chat_id=target_chat_id,
+                    text=caption,
+                    parse_mode="HTML",
+                )
 
             await message.bot.pin_chat_message(
-                chat_id=message.chat.id,
+                chat_id=target_chat_id,
                 message_id=sent.message_id,
             )
 
