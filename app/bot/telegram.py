@@ -125,9 +125,10 @@ def _register_handlers(dp: Dispatcher) -> None:
     # ========================
     @dp.inline_query()
     async def inline_play(query: InlineQuery) -> None:
-        text = (query.query or "").strip().lower()
+        raw = (query.query or "").lower()
+        text = raw.strip()
 
-        if text not in {"p", "m"}:
+        if raw not in {"playing", "playing ", "mood", "mood "}:
             return
 
         user_id = query.from_user.id
@@ -139,7 +140,7 @@ def _register_handlers(dp: Dispatcher) -> None:
         if not album_image_url:
             return
 
-        if text == "p":
+        if text == "playing":
             track_id = _normalize_optional_text(track.get("track_id"))
             if not track_id:
                 return
