@@ -154,7 +154,7 @@ def _register_handlers(dp: Dispatcher) -> None:
         display_name = query.from_user.full_name or "Usuário"
         album_image_url = track.get("album_image_url") or "https://via.placeholder.com/512"
         caption = (
-            f"<b><i>♫ {display_name} está ouvindo {track_name} — {artist}</i></b>"
+            f"<b><i>♫ {display_name} está ouvindo {track_name}</i></b>"
         )
 
         result = InlineQueryResultPhoto(
