@@ -357,6 +357,43 @@ def _register_handlers(dp: Dispatcher) -> None:
         except Exception as exc:
             await _handle_spotify_error(message, exc)
 
+    @dp.message(Command("kingplay"))
+    async def kingplay(message: Message) -> None:
+        user_id = message.from_user.id if message.from_user else 0
+        try:
+            track = await spotify_service.get_current_or_last_played(user_id)
+            if not track:
+                await message.answer("Nada está tocando agora.")
+                return
+
+            track_name_raw = _normalize_optional_text(track.get("track_name"))
+            artist_name_raw = _normalize_optional_text(track.get("artist"))
+            group_name_raw = _normalize_optional_text(message.chat.title)
+
+            track_name = html.escape(track_name_raw or "")
+            artist_name = html.escape(artist_name_raw or "")
+            group_name = html.escape(group_name_raw or "")
+
+            caption = f"♫ {group_name} está ouvindo {track_name} — {artist_name}"
+
+            album_image_url = track.get("album_image_url")
+            if album_image_url:
+                sent = await message.answer_photo(
+                    photo=str(album_image_url),
+                    caption=caption,
+                    parse_mode="HTML",
+                )
+            else:
+                sent = await message.answer(caption, parse_mode="HTML")
+
+            await message.bot.pin_chat_message(
+                chat_id=message.chat.id,
+                message_id=sent.message_id,
+            )
+
+        except Exception as exc:
+            await _handle_spotify_error(message, exc)
+
 
     @dp.message(Command("mood"))
     async def mood(message: Message) -> None:
