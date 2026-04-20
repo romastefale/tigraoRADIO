@@ -275,7 +275,6 @@ def _register_handlers(dp: Dispatcher) -> None:
             await _handle_spotify_error(message, exc)
 
 
-
     @dp.message(Command("mood"))
     async def mood(message: Message) -> None:
         user_id = message.from_user.id if message.from_user else 0
@@ -298,20 +297,6 @@ def _register_handlers(dp: Dispatcher) -> None:
             history_count = 0
             trend = "estável"
             with SessionLocal() as db:
-                history_rows = db.execute(
-                    text(
-                        """
-                        SELECT track_id
-                        FROM track_plays
-                        WHERE user_id = :user_id
-                        ORDER BY played_at DESC
-                        LIMIT 20
-                        """
-                    ),
-                    {"user_id": user_id},
-                ).all()
-                history_count = len(history_rows)
-
                 enriched_rows = db.execute(
                     text(
                         """
@@ -333,6 +318,7 @@ def _register_handlers(dp: Dispatcher) -> None:
                     and row.energy is not None
                     and row.danceability is not None
                 ]
+                history_count = len(valid_rows)
 
                 if len(valid_rows) >= 3:
                     valence = sum(float(row.valence) for row in valid_rows) / len(valid_rows)
@@ -364,8 +350,6 @@ def _register_handlers(dp: Dispatcher) -> None:
 
                     if row:
                         valence, energy, danceability = row
-                    elif track_id:
-                        asyncio.create_task(enrich_track_if_missing(track_id))
 
             if valence is None and energy is None and danceability is None and track_id:
                 asyncio.create_task(enrich_track_if_missing(track_id))
@@ -381,19 +365,33 @@ def _register_handlers(dp: Dispatcher) -> None:
             else:
                 user_label = "@unknown"
 
-            mood_valence = bar(float(valence)) if valence is not None else bar(4 / 8)
-            mood_energy = bar(float(energy)) if energy is not None else bar(5 / 8)
-            mood_danceability = bar(float(danceability)) if danceability is not None else bar(5 / 8)
+            ranking_energy = float(energy) if energy is not None else 0.5
+            if valence is not None and energy is not None:
+                ranking_energy = (float(energy) * 0.7) + (float(valence) * 0.3)
+
+            if ranking_energy >= 0.75:
+                rank = "🔥 muito alto"
+            elif ranking_energy >= 0.55:
+                rank = "⚡ alto"
+            elif ranking_energy >= 0.35:
+                rank = "🔹 médio"
+            else:
+                rank = "🌙 baixo"
+
+            mood_valence = bar(float(valence)) if valence is not None else bar(0.5)
+            mood_energy = bar(float(energy)) if energy is not None else bar(0.625)
+            mood_danceability = bar(float(danceability)) if danceability is not None else bar(0.625)
 
             text = (
-                f"🎹 {user_label} está ouvindo\n\n"
+                f"🎹 {user_label} está ouvindo\n"
+                f"🏅 nível: {rank}\n\n"
                 f"🎧 {track_name} — {artist}\n\n"
                 "🧠 Leitura musical\n\n"
                 f"😄 {mood_valence}\n"
                 f"⚡ {mood_energy}\n"
                 f"🎧 {mood_danceability}\n\n"
                 f"📈 tendência: {trend}\n"
-                f"📊 baseado nas últimas {history_count} músicas"
+                f"📊 baseado em {history_count} músicas analisadas"
             )
             await message.answer(text)
 
