@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 
 class SpotifyService:
     def __init__(self) -> None:
-        pass
+        self._app_access_token: str | None = None
+        self._app_access_token_expires_at: datetime | None = None
 
     async def startup(self) -> None:
         logger.info("Spotify service started.")
@@ -32,6 +33,14 @@ class SpotifyService:
         logger.info("Spotify service stopped.")
 
     async def _get_app_access_token(self) -> str | None:
+        now = datetime.utcnow()
+        if (
+            self._app_access_token
+            and self._app_access_token_expires_at
+            and now < self._app_access_token_expires_at
+        ):
+            return self._app_access_token
+
         auth_str = f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}"
         b64_auth = base64.b64encode(auth_str.encode()).decode()
 
@@ -59,7 +68,16 @@ class SpotifyService:
             logger.error("Spotify app token response missing access_token: %s", data)
             return None
 
-        return str(access_token)
+        expires_in = data.get("expires_in")
+        try:
+            expires_in_int = int(expires_in)
+        except (TypeError, ValueError):
+            expires_in_int = 3600
+
+        self._app_access_token = str(access_token)
+        self._app_access_token_expires_at = now + timedelta(seconds=max(1, expires_in_int - 30))
+
+        return self._app_access_token
 
     def build_auth_url(self, user_id: int) -> str:
         return (

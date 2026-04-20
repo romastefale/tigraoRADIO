@@ -17,24 +17,8 @@ async def enrich_track_if_missing(track_id: str) -> None:
         return
 
     try:
-        with SessionLocal() as db:
-            exists = db.execute(
-                text(
-                    """
-                    SELECT 1
-                    FROM track_audio_features
-                    WHERE track_id = :track_id
-                    LIMIT 1
-                    """
-                ),
-                {"track_id": normalized_track_id},
-            ).first()
-
-            if exists:
-                return
-
         features = await spotify_service.get_audio_features(normalized_track_id)
-        if not features:
+        if features is None:
             return
 
         with SessionLocal() as db:
