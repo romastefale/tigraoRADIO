@@ -6,6 +6,8 @@ import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import text
+
 from aiogram import Dispatcher, F
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
@@ -19,6 +21,7 @@ from aiogram.types import (
 )
 from app.bot.intent import detect_intent
 from app.core.runtime import allow
+from app.db.database import SessionLocal
 from app.services.likes import likes_service
 from app.services.enrichment import enrich_track_if_missing
 from app.services.spotify import spotify_service
@@ -277,15 +280,38 @@ def _register_handlers(dp: Dispatcher) -> None:
     async def mood(message: Message) -> None:
         user_id = message.from_user.id if message.from_user else 0
 
-        def bar(value: int) -> str:
-            bounded = max(0, min(8, value))
-            return "▰" * bounded + "▱" * (8 - bounded)
+        def bar(value: float) -> str:
+            filled = int(max(0, min(1, value)) * 8)
+            return "▰" * filled + "▱" * (8 - filled)
 
         try:
             track = await spotify_service.get_current_or_last_played(user_id)
             if not track:
                 await message.answer("Nada está tocando agora.")
                 return
+
+            track_id = track.get("track_id")
+
+            valence = None
+            energy = None
+            danceability = None
+            with SessionLocal() as db:
+                row = db.execute(
+                    text(
+                        """
+                        SELECT valence, energy, danceability
+                        FROM track_audio_features
+                        WHERE track_id = :track_id
+                        """
+                    ),
+                    {"track_id": track_id},
+                ).first()
+
+            if row:
+                valence, energy, danceability = row
+            else:
+                if track_id:
+                    asyncio.create_task(enrich_track_if_missing(track_id))
 
             track_name = _normalize_optional_text(track.get("track_name")) or "Desconhecida"
             artist = _normalize_optional_text(track.get("artist")) or "Desconhecido"
@@ -298,13 +324,17 @@ def _register_handlers(dp: Dispatcher) -> None:
             else:
                 user_label = "@unknown"
 
+            mood_valence = bar(float(valence)) if valence is not None else bar(4 / 8)
+            mood_energy = bar(float(energy)) if energy is not None else bar(5 / 8)
+            mood_danceability = bar(float(danceability)) if danceability is not None else bar(5 / 8)
+
             text = (
                 f"🎹 {user_label} está ouvindo\n\n"
                 f"🎧 {track_name} — {artist}\n\n"
                 "🧠 Leitura musical\n\n"
-                f"😄 {bar(4)}\n"
-                f"⚡ {bar(5)}\n"
-                f"🎧 {bar(5)}\n\n"
+                f"😄 {mood_valence}\n"
+                f"⚡ {mood_energy}\n"
+                f"🎧 {mood_danceability}\n\n"
                 "📈 tendência: estável"
             )
             await message.answer(text)
