@@ -130,22 +130,21 @@ def _register_handlers(dp: Dispatcher) -> None:
         if raw not in {"playing", "playing ", "mood", "mood "}:
             return
 
-        user_id = query.from_user.id
-        track = await spotify_service.get_current_or_last_played(user_id)
-        if not track:
-            return
-
-        album_image_url = track.get("album_image_url") or "https://via.placeholder.com/512"
-
         if text == "playing":
-            track_id = _normalize_optional_text(track.get("track_id"))
-            if not track_id:
-                track_id = "unknown"
+            user_id = query.from_user.id
+            track = await spotify_service.get_current_or_last_played(user_id)
+            if not track:
+                return
 
-            display_name = (query.from_user.full_name or "Usuário").strip()
-            plays = await likes_service.get_user_track_plays(user_id, track_id)
+            album_image_url = track.get("album_image_url") or "https://via.placeholder.com/512"
+            display_name = query.from_user.full_name or "Usuário"
             track_name = str(track.get("track_name") or "")
             artist = str(track.get("artist") or "")
+            track_id = track.get("track_id")
+            if track_id:
+                plays = await likes_service.get_user_track_plays(user_id, track_id)
+            else:
+                plays = 0
             caption = (
                 f"{display_name} · ♪ {plays}\n"
                 f"♫ {track_name} — {artist}"
@@ -160,6 +159,13 @@ def _register_handlers(dp: Dispatcher) -> None:
 
             await query.answer([result], cache_time=5)
             return
+
+        user_id = query.from_user.id
+        track = await spotify_service.get_current_or_last_played(user_id)
+        if not track:
+            return
+
+        album_image_url = track.get("album_image_url") or "https://via.placeholder.com/512"
 
         def bar(value: float) -> str:
             filled = max(1, int(max(0, min(1, value)) * 5))
