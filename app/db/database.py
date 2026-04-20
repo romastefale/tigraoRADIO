@@ -86,6 +86,57 @@ def run_migrations(engine) -> None:
         except Exception:
             pass
 
+        try:
+            conn.execute(text("ALTER TABLE track_likes ADD COLUMN owner_user_id INTEGER"))
+        except Exception:
+            pass
+
+        try:
+            index_rows = conn.execute(text("PRAGMA index_list(track_likes)")).all()
+            has_new_unique = any(str(row[1]) == "uq_user_owner_track_like" for row in index_rows)
+            if not has_new_unique:
+                conn.execute(text("DROP TABLE IF EXISTS track_likes_migrated"))
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE track_likes_migrated (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            user_id INTEGER NOT NULL,
+                            owner_user_id INTEGER,
+                            track_id VARCHAR NOT NULL,
+                            track_name VARCHAR,
+                            artist_name VARCHAR,
+                            liked INTEGER DEFAULT 1,
+                            created_at DATETIME NOT NULL
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO track_likes_migrated (
+                            id, user_id, owner_user_id, track_id, track_name, artist_name, liked, created_at
+                        )
+                        SELECT
+                            id, user_id, owner_user_id, track_id, track_name, artist_name, liked, created_at
+                        FROM track_likes
+                        """
+                    )
+                )
+                conn.execute(text("DROP TABLE track_likes"))
+                conn.execute(text("ALTER TABLE track_likes_migrated RENAME TO track_likes"))
+                conn.execute(text("CREATE INDEX ix_track_likes_user_id ON track_likes(user_id)"))
+                conn.execute(text("CREATE INDEX ix_track_likes_owner_user_id ON track_likes(owner_user_id)"))
+                conn.execute(text("CREATE INDEX ix_track_likes_track_id ON track_likes(track_id)"))
+                conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX uq_user_owner_track_like ON track_likes(user_id, owner_user_id, track_id)"
+                    )
+                )
+        except Exception:
+            pass
+
 
 # ========================
 # INIT

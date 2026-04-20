@@ -2,6 +2,7 @@ from __future__ import annotations
 import html
 import logging
 import random
+import re
 import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 bot_dispatcher: Dispatcher = Dispatcher()
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 BLOCKED_WORDS = ["palavra1", "palavra2"]
+OWNER_LINK_RE = re.compile(r"tg://user\?id=(\d+)")
 
 
 def _normalize_optional_text(value: object) -> str | None:
@@ -115,6 +117,20 @@ def _playing_keyboard(track_id: str, total_plays: int, total_likes: int, liked: 
             )
         ]
     ])
+
+
+def _extract_owner_user_id_from_message(message: Message | None) -> int | None:
+    if not message:
+        return None
+
+    payload = message.html_text or message.caption_html or message.text or message.caption or ""
+    match = OWNER_LINK_RE.search(payload)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except (TypeError, ValueError):
+        return None
 
 
 def _register_handlers(dp: Dispatcher) -> None:
@@ -317,15 +333,12 @@ def _register_handlers(dp: Dispatcher) -> None:
             )
 
             total_plays = await likes_service.get_track_play_count(track_id)
-            total_likes = await likes_service.get_total_likes(track_id)
-            user_total_likes = await likes_service.get_user_total_likes(user_id)
-            liked = await likes_service.is_track_liked(user_id, track_id)
+            total_likes = await likes_service.get_total_likes(track_id, owner_user_id=user_id)
+            user_total_likes = await likes_service.get_user_received_likes(user_id)
+            liked = await likes_service.is_track_liked(user_id, track_id, owner_user_id=user_id)
 
             display_name = message.from_user.full_name if message.from_user else "Unknown"
-            if message.from_user and message.from_user.username:
-                user_link = f"https://t.me/{message.from_user.username}"
-            else:
-                user_link = f"tg://user?id={user_id}"
+            user_link = f"tg://user?id={user_id}"
 
             track_name = track_name_raw or ""
             artist_name = artist_name_raw or ""
@@ -839,8 +852,9 @@ def _register_handlers(dp: Dispatcher) -> None:
 
         user_id = callback.from_user.id
 
-        liked = await likes_service.toggle_track_like(user_id, track_id)
-        total_likes = await likes_service.get_total_likes(track_id)
+        owner_user_id = _extract_owner_user_id_from_message(callback.message)
+        liked = await likes_service.toggle_track_like(user_id, owner_user_id, track_id)
+        total_likes = await likes_service.get_total_likes(track_id, owner_user_id=owner_user_id)
         total_plays = await likes_service.get_track_play_count(track_id)
 
         keyboard = _playing_keyboard(track_id, total_plays, total_likes, liked)
