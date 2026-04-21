@@ -627,11 +627,15 @@ def _register_handlers(dp: Dispatcher) -> None:
             plays_rows = db.execute(
                 text(
                     """
-                    SELECT track_id, COUNT(*) as total
+                    SELECT
+                        track_id,
+                        COALESCE(MAX(track_name), track_id) as track_label,
+                        COUNT(*) as total
                     FROM track_plays
                     WHERE user_id = :uid
                     GROUP BY track_id
                     ORDER BY total DESC
+                    LIMIT 5
                     """
                 ),
                 {"uid": target_user_id},
@@ -648,18 +652,24 @@ def _register_handlers(dp: Dispatcher) -> None:
                 {"uid": target_user_id},
             ).scalar() or 0
 
-            likes_rows = db.execute(
+            likes_sent_rows = db.execute(
                 text(
                     """
-                    SELECT track_id, COALESCE(liked, 1) as liked
+                    SELECT
+                        track_id,
+                        COALESCE(MAX(track_name), track_id) as track_label,
+                        COALESCE(MAX(liked), 1) as liked
                     FROM track_likes
                     WHERE user_id = :uid
+                    GROUP BY track_id
+                    ORDER BY MAX(created_at) DESC
+                    LIMIT 5
                     """
                 ),
                 {"uid": target_user_id},
             ).all()
 
-            total_likes = db.execute(
+            likes_sent = db.execute(
                 text(
                     """
                     SELECT COUNT(*)
@@ -671,29 +681,85 @@ def _register_handlers(dp: Dispatcher) -> None:
                 {"uid": target_user_id},
             ).scalar() or 0
 
+            likes_received_rows = db.execute(
+                text(
+                    """
+                    SELECT
+                        likes.track_id,
+                        COALESCE(MAX(likes.track_name), likes.track_id) as track_label,
+                        COUNT(*) as total
+                    FROM track_likes likes
+                    WHERE likes.owner_user_id = :uid
+                    AND COALESCE(likes.liked, 1) = 1
+                    GROUP BY likes.track_id
+                    ORDER BY total DESC
+                    LIMIT 5
+                    """
+                ),
+                {"uid": target_user_id},
+            ).all()
+
+            likes_received = db.execute(
+                text(
+                    """
+                    SELECT COUNT(*)
+                    FROM track_likes
+                    WHERE owner_user_id = :uid
+                    AND COALESCE(liked, 1) = 1
+                    """
+                ),
+                {"uid": target_user_id},
+            ).scalar() or 0
+
+        status = "ativo" if int(total_plays) > 0 else "inativo"
+        if int(total_plays) <= 0:
+            engagement = "baixo"
+        else:
+            ratio = float(likes_received) / float(total_plays)
+            if ratio >= 0.5:
+                engagement = "alto"
+            elif ratio >= 0.1:
+                engagement = "médio"
+            else:
+                engagement = "baixo"
+
         top_plays_lines = [
-            f"{row.track_id} → {row.total}"
-            for row in plays_rows[:10]
+            f"{row.track_label or row.track_id} → {row.total}"
+            for row in plays_rows
         ]
         if not top_plays_lines:
-            top_plays_lines = ["(sem dados)"]
+            top_plays_lines = ["Nenhum dado encontrado."]
 
-        likes_lines = [
-            f"{row.track_id} → {'♥' if int(row.liked or 0) == 1 else '♡'}"
-            for row in likes_rows[:10]
+        likes_received_lines = [
+            f"{row.track_label or row.track_id} → {row.total}"
+            for row in likes_received_rows
         ]
-        if not likes_lines:
-            likes_lines = ["(sem dados)"]
+        if not likes_received_lines:
+            likes_received_lines = ["Nenhum dado encontrado."]
+
+        likes_sent_lines = [
+            f"{row.track_label or row.track_id} → {'♥' if int(row.liked or 0) == 1 else '♡'}"
+            for row in likes_sent_rows
+        ]
+        if not likes_sent_lines:
+            likes_sent_lines = ["Nenhum dado encontrado."]
 
         response = (
             "DEBUG USER\n\n"
-            f"user_id: {target_user_id}\n"
-            f"total_plays: {total_plays}\n"
-            f"total_likes: {total_likes}\n\n"
-            "TOP PLAYS:\n"
+            f"user_id: {target_user_id}\n\n"
+            "RESUMO:\n"
+            f"plays totais: {total_plays}\n"
+            f"likes recebidos: {likes_received}\n"
+            f"likes enviados: {likes_sent}\n\n"
+            "COMPORTAMENTO:\n"
+            f"status: {status}\n"
+            f"engajamento: {engagement}\n\n"
+            "TOP MÚSICAS:\n"
             f"{chr(10).join(top_plays_lines)}\n\n"
-            "LIKES:\n"
-            f"{chr(10).join(likes_lines)}"
+            "LIKES RECEBIDOS:\n"
+            f"{chr(10).join(likes_received_lines)}\n\n"
+            "LIKES ENVIADOS:\n"
+            f"{chr(10).join(likes_sent_lines)}"
         )
         await message.answer(response)
 
@@ -714,8 +780,7 @@ def _register_handlers(dp: Dispatcher) -> None:
             "/purge <chat_id> <user_id> — banir usuário\n\n"
             "Debug:\n"
             "/debuguser <id> — auditoria completa\n"
-            "/debuglikes — ver likes\n"
-            "/debugplays — ver plays\n\n"
+            "\n"
             "Sistema:\n"
             "/healthfull — diagnóstico completo\n\n"
             "Uso restrito ao administrador"
@@ -735,6 +800,9 @@ def _register_handlers(dp: Dispatcher) -> None:
         spotify_status = "OK"
         flow_status = "OK"
         pending_updates: int | None = None
+        webhook_error_message: str | None = None
+        webhook_error_date_utc: str | None = None
+        webhook_error_code: int | None = None
 
         try:
             await message.bot.get_me()
@@ -754,8 +822,18 @@ def _register_handlers(dp: Dispatcher) -> None:
                     pending_value = result.get("pending_update_count")
                     if isinstance(pending_value, int):
                         pending_updates = pending_value
-                    if result.get("last_error_message"):
+                    raw_error_message = result.get("last_error_message")
+                    if raw_error_message:
                         webhook_status = "ERROR"
+                        webhook_error_message = str(raw_error_message)
+                        raw_error_date = result.get("last_error_date")
+                        if isinstance(raw_error_date, int):
+                            webhook_error_date_utc = datetime.utcfromtimestamp(raw_error_date).strftime("%Y-%m-%dT%H:%M:%SZ")
+                        elif raw_error_date is not None:
+                            webhook_error_date_utc = str(raw_error_date)
+                        raw_code = result.get("last_error_code")
+                        if isinstance(raw_code, int):
+                            webhook_error_code = raw_code
         except Exception:
             webhook_status = "ERROR"
 
@@ -796,6 +874,29 @@ def _register_handlers(dp: Dispatcher) -> None:
         ]
         if pending_updates is not None:
             lines.append(f"pending_updates: {pending_updates}")
+        if webhook_status == "ERROR" and webhook_error_message:
+            lines.extend(
+                [
+                    "",
+                    "Detalhes do webhook:",
+                    "",
+                    f"mensagem: {webhook_error_message}",
+                    f"data_utc: {webhook_error_date_utc or 'desconhecido'}",
+                    f"codigo: {webhook_error_code if webhook_error_code is not None else 'desconhecido'}",
+                    f"pending_updates: {pending_updates if pending_updates is not None else 0}",
+                    "",
+                    "DIAGNOSTICO:",
+                    "",
+                    "origem=webhook",
+                    "tipo=falha_entrega",
+                    f"mensagem={webhook_error_message}",
+                    f"codigo={webhook_error_code if webhook_error_code is not None else 'desconhecido'}",
+                    f"data_utc={webhook_error_date_utc or 'desconhecido'}",
+                    f"pending_updates={pending_updates if pending_updates is not None else 0}",
+                    "",
+                    "acao_recomendada=verificar_webhook_endpoint,verificar_latencia,revisar_logs",
+                ]
+            )
         if "ERROR" in (
             telegram_status,
             webhook_status,
