@@ -36,7 +36,7 @@ bot_dispatcher: Dispatcher = Dispatcher()
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 BLOCKED_WORDS = ["palavra1", "palavra2"]
 OWNER_LINK_RE = re.compile(r"tg://user\?id=(\d+)")
-MOOD_PHRASES = {
+MOOD_PHRASES_NORMAL = {
     0: "☹︎ <i>Acho que <b>{name}</b> está no fundo de um abismo, onde até o silêncio pesa.</i>",
     1: "⍨ <i>Acho que <b>{name}</b> está preso em uma melancolia que drena até o que resta.</i>",
     2: "❃ <i>Acho que <b>{name}</b> está vagando em incertezas, tentando se reconhecer.</i>",
@@ -48,6 +48,19 @@ MOOD_PHRASES = {
     8: "✶ <i>Acho que <b>{name}</b> está irradiando energia que aquece tudo ao redor.</i>",
     9: "✵ <i>Acho que <b>{name}</b> está em êxtase, vibrando acima de tudo.</i>",
     10: "☻ <i>Acho que <b>{name}</b> está radiante, tomado por uma felicidade que transborda.</i>",
+}
+MOOD_PHRASES_CUNTY = {
+    0: "☹︎ <i>Acho que <b>{name}</b> não está mal — queria nem existir mesmo.</i>",
+    1: "⍨ <i>Acho que <b>{name}</b> está se arrastando por um dia que nem deveria ter existido.</i>",
+    2: "❃ <i>Acho que <b>{name}</b> está fudido, mas sabe que vai dar um jeito.</i>",
+    3: "⚲ <i>Acho que <b>{name}</b> está cansado de muito e de muitos, mas ainda não desistiu — vai ter volta.</i>",
+    4: "✧ <i>Acho que <b>{name}</b> está começando a reagir, o fim de alguns está previsto.</i>",
+    5: "ꕤ <i>Acho que <b>{name}</b> está indo — não por acaso, mas porque é uma gostosa resiliente.</i>",
+    6: "✦ <i>Acho que <b>{name}</b> está voltando, gostosas são assim, como uma fênix.</i>",
+    7: "❀ <i>Acho que <b>{name}</b> está bem — e dessa vez, não haverá paz.</i>",
+    8: "✶ <i>Acho que <b>{name}</b> está brilhando de um jeito que incomoda — quem não aguenta se queima.</i>",
+    9: "✵ <i>Acho que hoje <b>{name}</b> vai destruir alguém!!!</i>",
+    10: "☻ <i>Tenho certeza que <b>{name}</b> tem poder para iniciar o novo apocalipse — apenas tome cuidado.</i>",
 }
 
 
@@ -193,8 +206,15 @@ def _register_handlers(dp: Dispatcher) -> None:
         if len(parts) < 2:
             return
 
+        valor = parts[1]
+        if valor.endswith("c"):
+            modo = "cunty"
+            valor = valor[:-1]
+        else:
+            modo = "normal"
+
         try:
-            nota = int(parts[1])
+            nota = int(valor)
         except ValueError:
             return
 
@@ -209,7 +229,8 @@ def _register_handlers(dp: Dispatcher) -> None:
         display_name = html.escape(query.from_user.full_name or "Usuário")
         track_name = html.escape(str(track["track_name"]))
         artist = html.escape(str(track["artist"]))
-        phrase = MOOD_PHRASES[nota].format(name=display_name)
+        phrases = MOOD_PHRASES_CUNTY if modo == "cunty" else MOOD_PHRASES_NORMAL
+        phrase = phrases[nota].format(name=display_name)
         caption = (
             f"{display_name} · ♫ {track_name} — {artist}\n\n"
             f"{phrase}"
@@ -416,8 +437,15 @@ def _register_handlers(dp: Dispatcher) -> None:
                 )
                 return
 
+            valor = parts[1]
+            if valor.endswith("c"):
+                modo = "cunty"
+                valor = valor[:-1]
+            else:
+                modo = "normal"
+
             try:
-                nota = int(parts[1])
+                nota = int(valor)
             except ValueError:
                 await message.answer(
                     "Erro: valor inválido.\n"
@@ -445,7 +473,8 @@ def _register_handlers(dp: Dispatcher) -> None:
             artist = html.escape(str(track["artist"]))
             album_image_url = track.get("album_image_url")
             from_user_id = message.from_user.id if message.from_user else user_id
-            phrase = MOOD_PHRASES[nota].format(name=display_name)
+            phrases = MOOD_PHRASES_CUNTY if modo == "cunty" else MOOD_PHRASES_NORMAL
+            phrase = phrases[nota].format(name=display_name)
             caption = (
                 f'<a href="tg://user?id={from_user_id}">{display_name}</a> · '
                 f"♫ {track_name} — {artist}\n\n"
