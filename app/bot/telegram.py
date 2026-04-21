@@ -50,16 +50,16 @@ MOOD_PHRASES_NORMAL = {
     10: "☻ <i>Acho que <b>{name}</b> está radiante, tomado por uma felicidade que transborda.</i>",
 }
 MOOD_PHRASES_CUNTY = {
-    0: "☹︎ <i>Acho que <b>{name}</b> não está mal — queria nem existir mesmo.</i>",
-    1: "⍨ <i>Acho que <b>{name}</b> está se arrastando por um dia que nem deveria ter existido.</i>",
+    0: "☹︎ <i>Infelizmente <b>{name}</b> não está mal — queria nem existir mesmo.</i>",
+    1: "⍨ <i>Dessa vez <b>{name}</b> está se arrastando por um dia que nem deveria ter existido.</i>",
     2: "❃ <i>Acho que <b>{name}</b> está fudido, mas sabe que vai dar um jeito.</i>",
     3: "⚲ <i>Acho que <b>{name}</b> está cansado de muito e de muitos, mas ainda não desistiu — vai ter volta.</i>",
-    4: "✧ <i>Acho que <b>{name}</b> está começando a reagir, o fim de alguns está previsto.</i>",
-    5: "ꕤ <i>Acho que <b>{name}</b> está indo — não por acaso, mas porque é uma gostosa resiliente.</i>",
-    6: "✦ <i>Acho que <b>{name}</b> está voltando, gostosas são assim, como uma fênix.</i>",
-    7: "❀ <i>Acho que <b>{name}</b> está bem — e dessa vez, não haverá paz.</i>",
-    8: "✶ <i>Acho que <b>{name}</b> está brilhando de um jeito que incomoda — quem não aguenta se queima.</i>",
-    9: "✵ <i>Acho que hoje <b>{name}</b> vai destruir alguém!!!</i>",
+    4: "✧ <i>Felizmente <b>{name}</b> está começando a reagir, o fim de alguns está previsto.</i>",
+    5: "ꕤ <i>Acho que <b>{name}</b> está acordando — não por acaso, mas porque é uma gostosa resiliente.</i>",
+    6: "✦ <i>Boatos que <b>{name}</b> está voltando, gostosas são assim, como uma fênix.</i>",
+    7: "❀ <i>Soube que <b>{name}</b> está bem — e dessa vez, não haverá paz.</i>",
+    8: "✶ <i>O <b>{name}</b> está brilhando de um jeito que incomoda, e quem tem inveja se queima.</i>",
+    9: "✵ <i>Hoje <b>{name}</b> vai destruir alguém.</i>",
     10: "☻ <i>Tenho certeza que <b>{name}</b> tem poder para iniciar o novo apocalipse — apenas tome cuidado.</i>",
 }
 
