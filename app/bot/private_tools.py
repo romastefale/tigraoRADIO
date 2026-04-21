@@ -79,9 +79,10 @@ async def myjoin(message: Message) -> None:
     parts = (message.text or "").split()
     if len(parts) < 2:
         await message.answer(
-            "Erro: comando incompleto.\n"
-            "Motivo: chat_id não informado.\n"
-            "Use: /myjoin <chat_id>\n"
+            "Erro: comando inválido.\n"
+            "Motivo: formato incorreto.\n"
+            "Exemplo correto:\n"
+            "/myjoin <chat_id>\n"
             "Tente novamente."
         )
         return
@@ -104,9 +105,18 @@ async def myjoin(message: Message) -> None:
             member_limit=1,
             expire_date=datetime.now(timezone.utc) + SINGLE_USE_EXPIRY,
         )
-        await message.answer(invite.invite_link)
+        await message.answer(
+            f"Sucesso.\n\n"
+            f"Grupo: {chat_id}\n"
+            f"Link de entrada direta gerado."
+        )
     except Exception:
-        await message.answer("❌ Failed to create direct invite link.")
+        await message.answer(
+            "Erro: operação não permitida.\n"
+            "Motivo: o bot não possui permissão no grupo informado.\n"
+            "Verifique se o bot é administrador.\n"
+            "Tente novamente."
+        )
 
 
 @router.message(Command("mylink"))
@@ -114,9 +124,10 @@ async def mylink(message: Message) -> None:
     parts = (message.text or "").split()
     if len(parts) < 2:
         await message.answer(
-            "Erro: comando incompleto.\n"
-            "Motivo: chat_id não informado.\n"
-            "Use: /mylink <chat_id>\n"
+            "Erro: comando inválido.\n"
+            "Motivo: formato incorreto.\n"
+            "Exemplo correto:\n"
+            "/mylink <chat_id>\n"
             "Tente novamente."
         )
         return
@@ -137,9 +148,18 @@ async def mylink(message: Message) -> None:
             chat_id=chat_id,
             creates_join_request=True,
         )
-        await message.answer(invite.invite_link)
+        await message.answer(
+            f"Sucesso.\n\n"
+            f"Grupo: {chat_id}\n"
+            f"Link de solicitação de entrada gerado."
+        )
     except Exception:
-        await message.answer("❌ Failed to create join-request link.")
+        await message.answer(
+            "Erro: operação não permitida.\n"
+            "Motivo: o bot não possui permissão no grupo informado.\n"
+            "Verifique se o bot é administrador.\n"
+            "Tente novamente."
+        )
 
 
 @router.message(Command("mybad"))
@@ -149,20 +169,31 @@ async def mybad(message: Message) -> None:
     parts = (message.text or "").split()
     if len(parts) < 3:
         await message.answer(
-            "Erro: comando incompleto.\n"
-            "Motivo: chat_id ou user_id não informado.\n"
-            "Use: /mybad <chat_id> <user_id>\n"
+            "Erro: comando inválido.\n"
+            "Motivo: formato incorreto.\n"
+            "Exemplo correto:\n"
+            "/mybad <chat_id> <user_id>\n"
             "Tente novamente."
         )
         return
 
     try:
         chat_id = int(parts[1])
+    except Exception:
+        await message.answer(
+            "Erro: chat_id inválido.\n"
+            "Motivo: o valor informado não é um número válido.\n"
+            "Use: /mybad <chat_id>\n"
+            "Tente novamente."
+        )
+        return
+
+    try:
         user_id = int(parts[2])
     except Exception:
         await message.answer(
-            "Erro: parâmetros inválidos.\n"
-            "Motivo: chat_id ou user_id não são números válidos.\n"
+            "Erro: user_id inválido.\n"
+            "Motivo: o valor informado não é um número válido.\n"
             "Use: /mybad <chat_id> <user_id>\n"
             "Tente novamente."
         )
@@ -190,12 +221,22 @@ async def mybad(message: Message) -> None:
         ).mappings().first()
 
     if not row:
-        await message.answer("❌ No recent join request found for this user.")
+        await message.answer(
+            "Erro: falha na execução.\n"
+            "Motivo: não foi possível completar a ação.\n"
+            "Verifique os dados informados.\n"
+            "Tente novamente."
+        )
         return
 
     created_at = _parse_created_at(row["created_at"])
     if created_at is None or created_at < cutoff:
-        await message.answer("❌ Join request expired.")
+        await message.answer(
+            "Erro: falha na execução.\n"
+            "Motivo: não foi possível completar a ação.\n"
+            "Verifique os dados informados.\n"
+            "Tente novamente."
+        )
         return
 
     try:
@@ -204,7 +245,12 @@ async def mybad(message: Message) -> None:
             user_id=user_id,
         )
     except Exception:
-        await message.answer("❌ Failed to approve join request.")
+        await message.answer(
+            "Erro: operação não permitida.\n"
+            "Motivo: o bot não possui permissão no grupo informado.\n"
+            "Verifique se o bot é administrador.\n"
+            "Tente novamente."
+        )
         return
 
     with engine.begin() as conn:
@@ -221,7 +267,11 @@ async def mybad(message: Message) -> None:
             },
         )
 
-    await message.answer("✅ Join request approved.")
+    await message.answer(
+        f"Sucesso.\n\n"
+        f"Grupo: {chat_id}\n"
+        f"Usuário {user_id} aprovado."
+    )
 
 
 @router.message(Command("purge"))
@@ -231,20 +281,31 @@ async def purge(message: Message) -> None:
     parts = (message.text or "").split()
     if len(parts) < 3:
         await message.answer(
-            "Erro: comando incompleto.\n"
-            "Motivo: chat_id ou user_id não informado.\n"
-            "Use: /purge <chat_id> <user_id>\n"
+            "Erro: comando inválido.\n"
+            "Motivo: formato incorreto.\n"
+            "Exemplo correto:\n"
+            "/purge <chat_id> <user_id>\n"
             "Tente novamente."
         )
         return
 
     try:
         chat_id = int(parts[1])
+    except Exception:
+        await message.answer(
+            "Erro: chat_id inválido.\n"
+            "Motivo: o valor informado não é um número válido.\n"
+            "Use: /purge <chat_id>\n"
+            "Tente novamente."
+        )
+        return
+
+    try:
         user_id = int(parts[2])
     except Exception:
         await message.answer(
-            "Erro: parâmetros inválidos.\n"
-            "Motivo: chat_id ou user_id não são números válidos.\n"
+            "Erro: user_id inválido.\n"
+            "Motivo: o valor informado não é um número válido.\n"
             "Use: /purge <chat_id> <user_id>\n"
             "Tente novamente."
         )
@@ -256,7 +317,12 @@ async def purge(message: Message) -> None:
             user_id=user_id,
         )
     except Exception:
-        await message.answer("❌")
+        await message.answer(
+            "Erro: operação não permitida.\n"
+            "Motivo: o bot não possui permissão no grupo informado.\n"
+            "Verifique se o bot é administrador.\n"
+            "Tente novamente."
+        )
         return
 
     with engine.begin() as conn:
@@ -265,4 +331,8 @@ async def purge(message: Message) -> None:
             {"user_id": user_id},
         )
 
-    await message.answer("🚫")
+    await message.answer(
+        f"Sucesso.\n\n"
+        f"Grupo: {chat_id}\n"
+        f"Usuário {user_id} removido."
+    )
