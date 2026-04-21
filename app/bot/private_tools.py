@@ -11,7 +11,6 @@ from app.db.database import engine
 
 
 OWNER_ID = 8505890439
-MAIN_GROUP_ID = -1002556760909
 APPROVAL_WINDOW = timedelta(hours=2)
 SINGLE_USE_EXPIRY = timedelta(minutes=5)
 
@@ -77,9 +76,30 @@ async def handle_join_request(event: ChatJoinRequest) -> None:
 
 @router.message(Command("myjoin"))
 async def myjoin(message: Message) -> None:
+    parts = (message.text or "").split()
+    if len(parts) < 2:
+        await message.answer(
+            "Erro: comando incompleto.\n"
+            "Motivo: chat_id não informado.\n"
+            "Use: /myjoin <chat_id>\n"
+            "Tente novamente."
+        )
+        return
+
+    try:
+        chat_id = int(parts[1])
+    except Exception:
+        await message.answer(
+            "Erro: chat_id inválido.\n"
+            "Motivo: o valor informado não é um número válido.\n"
+            "Use: /myjoin <chat_id>\n"
+            "Tente novamente."
+        )
+        return
+
     try:
         invite = await message.bot.create_chat_invite_link(
-            chat_id=MAIN_GROUP_ID,
+            chat_id=chat_id,
             creates_join_request=False,
             member_limit=1,
             expire_date=datetime.now(timezone.utc) + SINGLE_USE_EXPIRY,
@@ -91,9 +111,30 @@ async def myjoin(message: Message) -> None:
 
 @router.message(Command("mylink"))
 async def mylink(message: Message) -> None:
+    parts = (message.text or "").split()
+    if len(parts) < 2:
+        await message.answer(
+            "Erro: comando incompleto.\n"
+            "Motivo: chat_id não informado.\n"
+            "Use: /mylink <chat_id>\n"
+            "Tente novamente."
+        )
+        return
+
+    try:
+        chat_id = int(parts[1])
+    except Exception:
+        await message.answer(
+            "Erro: chat_id inválido.\n"
+            "Motivo: o valor informado não é um número válido.\n"
+            "Use: /mylink <chat_id>\n"
+            "Tente novamente."
+        )
+        return
+
     try:
         invite = await message.bot.create_chat_invite_link(
-            chat_id=MAIN_GROUP_ID,
+            chat_id=chat_id,
             creates_join_request=True,
         )
         await message.answer(invite.invite_link)
@@ -105,12 +146,28 @@ async def mylink(message: Message) -> None:
 async def mybad(message: Message) -> None:
     _ensure_join_requests_table()
 
-    args = (message.text or "").split(maxsplit=1)
-    if len(args) < 2 or not args[1].strip().isdigit():
-        await message.answer("Usage: /mybad <user_id>")
+    parts = (message.text or "").split()
+    if len(parts) < 3:
+        await message.answer(
+            "Erro: comando incompleto.\n"
+            "Motivo: chat_id ou user_id não informado.\n"
+            "Use: /mybad <chat_id> <user_id>\n"
+            "Tente novamente."
+        )
         return
 
-    target_user_id = int(args[1].strip())
+    try:
+        chat_id = int(parts[1])
+        user_id = int(parts[2])
+    except Exception:
+        await message.answer(
+            "Erro: parâmetros inválidos.\n"
+            "Motivo: chat_id ou user_id não são números válidos.\n"
+            "Use: /mybad <chat_id> <user_id>\n"
+            "Tente novamente."
+        )
+        return
+
     cutoff = datetime.now(timezone.utc) - APPROVAL_WINDOW
 
     with engine.begin() as conn:
@@ -124,12 +181,12 @@ async def mybad(message: Message) -> None:
                 """
                 SELECT user_id, chat_id, created_at
                 FROM join_requests
-                WHERE user_id = :user_id
+                WHERE user_id = :user_id AND chat_id = :chat_id
                 ORDER BY created_at DESC
                 LIMIT 1
                 """
             ),
-            {"user_id": target_user_id},
+            {"user_id": user_id, "chat_id": chat_id},
         ).mappings().first()
 
     if not row:
@@ -143,8 +200,8 @@ async def mybad(message: Message) -> None:
 
     try:
         await message.bot.approve_chat_join_request(
-            chat_id=int(row["chat_id"]),
-            user_id=int(row["user_id"]),
+            chat_id=chat_id,
+            user_id=user_id,
         )
     except Exception:
         await message.answer("❌ Failed to approve join request.")
@@ -159,8 +216,8 @@ async def mybad(message: Message) -> None:
                 """
             ),
             {
-                "user_id": int(row["user_id"]),
-                "chat_id": int(row["chat_id"]),
+                "user_id": user_id,
+                "chat_id": chat_id,
             },
         )
 
@@ -171,16 +228,31 @@ async def mybad(message: Message) -> None:
 async def purge(message: Message) -> None:
     _ensure_join_requests_table()
 
-    args = (message.text or "").split(maxsplit=1)
-    if len(args) < 2 or not args[1].strip().isdigit():
-        await message.answer("❌")
+    parts = (message.text or "").split()
+    if len(parts) < 3:
+        await message.answer(
+            "Erro: comando incompleto.\n"
+            "Motivo: chat_id ou user_id não informado.\n"
+            "Use: /purge <chat_id> <user_id>\n"
+            "Tente novamente."
+        )
         return
 
-    user_id = int(args[1].strip())
+    try:
+        chat_id = int(parts[1])
+        user_id = int(parts[2])
+    except Exception:
+        await message.answer(
+            "Erro: parâmetros inválidos.\n"
+            "Motivo: chat_id ou user_id não são números válidos.\n"
+            "Use: /purge <chat_id> <user_id>\n"
+            "Tente novamente."
+        )
+        return
 
     try:
         await message.bot.ban_chat_member(
-            chat_id=MAIN_GROUP_ID,
+            chat_id=chat_id,
             user_id=user_id,
         )
     except Exception:
