@@ -19,6 +19,8 @@ from aiogram.types import (
     CallbackQuery,
     InlineQuery,
     InlineQueryResultPhoto,
+    InlineQueryResultArticle,
+    InputTextMessageContent,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
 )
@@ -36,6 +38,19 @@ bot_dispatcher: Dispatcher = Dispatcher()
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 BLOCKED_WORDS = ["palavra1", "palavra2"]
 OWNER_LINK_RE = re.compile(r"tg://user\?id=(\d+)")
+MOOD_PHRASES = {
+    0: "☹︎ <i>Acho que <b>{name}</b> está no fundo de um abismo, onde até o silêncio pesa.</i>",
+    1: "⍨ <i>Acho que <b>{name}</b> está preso em uma melancolia que drena até o que resta.</i>",
+    2: "❃ <i>Acho que <b>{name}</b> está vagando em incertezas, tentando se reconhecer.</i>",
+    3: "⚲ <i>Acho que <b>{name}</b> está lutando para manter acesa uma esperança.</i>",
+    4: "✧ <i>Acho que <b>{name}</b> está começando a enxergar luz onde antes só havia peso.</i>",
+    5: "ꕤ <i>Acho que <b>{name}</b> está em equilíbrio, sustentando o próprio centro.</i>",
+    6: "✦ <i>Acho que <b>{name}</b> está retomando o controle e sentindo a força voltar.</i>",
+    7: "❀ <i>Acho que <b>{name}</b> está florescendo, em paz com o presente.</i>",
+    8: "✶ <i>Acho que <b>{name}</b> está irradiando energia que aquece tudo ao redor.</i>",
+    9: "✵ <i>Acho que <b>{name}</b> está em êxtase, vibrando acima de tudo.</i>",
+    10: "☻ <i>Acho que <b>{name}</b> está radiante, tomado por uma felicidade que transborda.</i>",
+}
 
 
 def _normalize_optional_text(value: object) -> str | None:
@@ -143,8 +158,81 @@ def _register_handlers(dp: Dispatcher) -> None:
     # ========================
     @dp.inline_query()
     async def inline_play(query: InlineQuery) -> None:
-        text = (query.query or "").strip().lower()
-        if text != "playing":
+        text = (query.query or "").strip()
+        lowered_text = text.lower()
+        if lowered_text == "playing":
+            user_id = query.from_user.id
+            track = await spotify_service.get_current_or_last_played(user_id)
+            if not track:
+                return
+
+            track_name = str(track.get("track_name") or "")
+            artist = str(track.get("artist") or "")
+            spotify_url = str(track.get("spotify_url") or "")
+            display_name = query.from_user.full_name or "Usuário"
+            album_image_url = track.get("album_image_url") or "https://via.placeholder.com/512"
+            caption = (
+                f"<b><i>♫ {display_name} está ouvindo "
+                f"<a href=\"{spotify_url}\">{track_name}</a>"
+                f"</i></b>"
+            )
+
+            result = InlineQueryResultPhoto(
+                id=str(uuid.uuid4()),
+                photo_url=album_image_url,
+                thumbnail_url=album_image_url,
+                caption=caption,
+                parse_mode="HTML",
+            )
+
+            await query.answer([result], cache_time=2)
+            return
+
+        if not lowered_text.startswith("mood"):
+            return
+
+        parts = text.split()
+        invalid_text = (
+            "Erro: valor inválido.\n"
+            "Use: /mood <0-10>\n"
+            "Tente novamente."
+        )
+        if len(parts) < 2:
+            result = InlineQueryResultArticle(
+                id=str(uuid.uuid4()),
+                title="Mood inválido",
+                input_message_content=InputTextMessageContent(
+                    message_text=invalid_text,
+                ),
+                description="Use mood <0-10>",
+            )
+            await query.answer([result], cache_time=2)
+            return
+
+        try:
+            nota = int(parts[1])
+        except ValueError:
+            result = InlineQueryResultArticle(
+                id=str(uuid.uuid4()),
+                title="Mood inválido",
+                input_message_content=InputTextMessageContent(
+                    message_text=invalid_text,
+                ),
+                description="Use mood <0-10>",
+            )
+            await query.answer([result], cache_time=2)
+            return
+
+        if nota < 0 or nota > 10:
+            result = InlineQueryResultArticle(
+                id=str(uuid.uuid4()),
+                title="Mood inválido",
+                input_message_content=InputTextMessageContent(
+                    message_text=invalid_text,
+                ),
+                description="Use mood <0-10>",
+            )
+            await query.answer([result], cache_time=2)
             return
 
         user_id = query.from_user.id
@@ -152,16 +240,15 @@ def _register_handlers(dp: Dispatcher) -> None:
         if not track:
             return
 
-        track_name = str(track.get("track_name") or "")
-        artist = str(track.get("artist") or "")
-        spotify_url = str(track.get("spotify_url") or "")
-        display_name = query.from_user.full_name or "Usuário"
-        album_image_url = track.get("album_image_url") or "https://via.placeholder.com/512"
+        display_name = html.escape(query.from_user.full_name or "Usuário")
+        track_name = html.escape(str(track.get("track_name") or "Desconhecida"))
+        artist = html.escape(str(track.get("artist") or "Desconhecido"))
+        phrase = MOOD_PHRASES[nota].format(name=display_name)
         caption = (
-            f"<b><i>♫ {display_name} está ouvindo "
-            f"<a href=\"{spotify_url}\">{track_name}</a>"
-            f"</i></b>"
+            f"{display_name} · ♫ {track_name} — {artist}\n\n"
+            f"{phrase}"
         )
+        album_image_url = track.get("album_image_url") or "https://via.placeholder.com/512"
 
         result = InlineQueryResultPhoto(
             id=str(uuid.uuid4()),
@@ -170,7 +257,6 @@ def _register_handlers(dp: Dispatcher) -> None:
             caption=caption,
             parse_mode="HTML",
         )
-
         await query.answer([result], cache_time=2)
 
     # ========================
@@ -350,178 +436,49 @@ def _register_handlers(dp: Dispatcher) -> None:
 
     @dp.message(Command("mood"))
     async def mood(message: Message) -> None:
-        user_id = message.from_user.id if message.from_user else 0
-
-        def bar(value: float) -> str:
-            filled = max(1, int(max(0, min(1, value)) * 5))
-            return "▰" * filled + "▱" * (5 - filled)
-
         try:
+            user_id = message.from_user.id if message.from_user else 0
+            parts = (message.text or "").split()
+            if len(parts) < 2:
+                await message.answer(
+                    "Erro: valor inválido.\n"
+                    "Use: /mood <0-10>\n"
+                    "Tente novamente."
+                )
+                return
+
+            try:
+                nota = int(parts[1])
+            except ValueError:
+                await message.answer(
+                    "Erro: valor inválido.\n"
+                    "Use: /mood <0-10>\n"
+                    "Tente novamente."
+                )
+                return
+
+            if nota < 0 or nota > 10:
+                await message.answer(
+                    "Erro: valor inválido.\n"
+                    "Use: /mood <0-10>\n"
+                    "Tente novamente."
+                )
+                return
+
             track = await spotify_service.get_current_or_last_played(user_id)
             if not track:
                 await message.answer("Nada está tocando agora.")
                 return
 
-            track_id = _normalize_optional_text(track.get("track_id"))
-            if not track_id:
-                await message.answer("Erro ao identificar a música.")
-                return
-
-            valence = None
-            energy = None
-            danceability = None
-            history_count = 0
-            trend = "estável"
-            with SessionLocal() as db:
-                enriched_rows = db.execute(
-                    text(
-                        """
-                        SELECT t.track_id, f.valence, f.energy, f.danceability
-                        FROM track_plays t
-                        JOIN track_audio_features f ON t.track_id = f.track_id
-                        WHERE t.user_id = :user_id
-                        ORDER BY t.played_at DESC
-                        LIMIT 20
-                        """
-                    ),
-                    {"user_id": user_id},
-                ).all()
-
-                valid_rows = [
-                    row
-                    for row in enriched_rows
-                    if row.valence is not None
-                    and row.energy is not None
-                    and row.danceability is not None
-                ]
-                history_count = len(valid_rows)
-
-                if len(valid_rows) >= 3:
-                    valence = sum(float(row.valence) for row in valid_rows) / len(valid_rows)
-                    energy = sum(float(row.energy) for row in valid_rows) / len(valid_rows)
-                    danceability = sum(float(row.danceability) for row in valid_rows) / len(valid_rows)
-
-                    recent_energy = [float(row.energy) for row in valid_rows[:3]]
-                    baseline_energy = [float(row.energy) for row in valid_rows[3:]]
-                    threshold = 0.05
-
-                    if baseline_energy:
-                        recent_avg = sum(recent_energy) / len(recent_energy)
-                        baseline_avg = sum(baseline_energy) / len(baseline_energy)
-                        if recent_avg > baseline_avg + threshold:
-                            trend = "subindo"
-                        elif recent_avg < baseline_avg - threshold:
-                            trend = "caindo"
-                else:
-                    row = db.execute(
-                        text(
-                            """
-                            SELECT valence, energy, danceability
-                            FROM track_audio_features
-                            WHERE track_id = :track_id
-                            """
-                        ),
-                        {"track_id": track_id},
-                    ).first()
-
-                    if row:
-                        valence, energy, danceability = row
-
-            if valence is None and energy is None and danceability is None and track_id:
-                logger.info("ENRICH_TRIGGER track_id=%s", track_id)
-                with SessionLocal() as db:
-                    exists = db.execute(
-                        text("SELECT 1 FROM track_audio_features WHERE track_id = :track_id"),
-                        {"track_id": track_id},
-                    ).first()
-                if not exists:
-                    await enrich_track_if_missing(track_id, user_id)
-
-            valence = float(valence) if valence is not None else 0.5
-            energy = float(energy) if energy is not None else 0.5
-            danceability = float(danceability) if danceability is not None else 0.5
-
-            display_name = message.from_user.full_name if message.from_user else "Usuário"
-            track_name = _normalize_optional_text(track.get("track_name")) or "Desconhecida"
-            artist = _normalize_optional_text(track.get("artist")) or "Desconhecido"
-
-            safe_name = html.escape(display_name)
-            safe_track = html.escape(track_name)
-            safe_artist = html.escape(artist)
-
-            if message.from_user and message.from_user.username:
-                profile_link = f"https://t.me/{message.from_user.username}"
-            else:
-                profile_link = f"tg://user?id={user_id}"
-            user_link = f"<a href=\"{html.escape(profile_link)}\">{safe_name}</a>"
-            score = await likes_service.get_user_total_likes(user_id)
-            total_plays = await likes_service.get_track_play_count(track_id)
-            total_likes = await likes_service.get_total_likes(track_id)
-            liked = await likes_service.is_track_liked(user_id, track_id)
-            keyboard = _playing_keyboard(track_id, total_plays, total_likes, liked)
-
-            if valence >= 0.75:
-                diagnostic = random.choice(
-                    [
-                        "Acho que {user} está muito feliz!",
-                        "Acho que {user} está em ótima vibe!",
-                        "Acho que {user} está radiante!",
-                    ]
-                )
-            elif valence >= 0.55:
-                diagnostic = random.choice(
-                    [
-                        "Acho que {user} está bem!",
-                        "Acho que {user} está de boa!",
-                        "Acho que {user} está numa boa vibe!",
-                    ]
-                )
-            elif valence >= 0.40:
-                diagnostic = random.choice(
-                    [
-                        "Acho que {user} está estável.",
-                        "Acho que {user} está equilibrado.",
-                    ]
-                )
-            elif valence >= 0.25:
-                diagnostic = random.choice(
-                    [
-                        "Acho que {user} está pensativo.",
-                        "Acho que {user} está mais na dele.",
-                    ]
-                )
-            else:
-                diagnostic = random.choice(
-                    [
-                        "Acho que {user} está introspectivo.",
-                        "Acho que {user} está reflexivo.",
-                    ]
-                )
-
-            diagnostic = diagnostic.format(user=user_link)
-
+            display_name = html.escape(message.from_user.full_name if message.from_user else "Usuário")
+            track_name = html.escape(_normalize_optional_text(track.get("track_name")) or "Desconhecida")
+            artist = html.escape(_normalize_optional_text(track.get("artist")) or "Desconhecido")
+            phrase = MOOD_PHRASES[nota].format(name=display_name)
             caption = (
-                f"{safe_name} · ♥ {score}\n"
-                f"♫ {safe_track} — {safe_artist}\n\n"
-                f"☻ {bar(valence)}  humor\n"
-                f"ϟ {bar(energy)}  energia\n"
-                f"✶ {bar(danceability)}  ritmo\n\n"
-                f"≡ {diagnostic}"
+                f"{display_name} · ♫ {track_name} — {artist}\n\n"
+                f"{phrase}"
             )
-
-            album_image_url = track.get("album_image_url")
-            if album_image_url:
-                await message.answer_photo(
-                    photo=str(album_image_url),
-                    caption=caption,
-                    parse_mode="HTML",
-                )
-            else:
-                await message.answer(
-                    caption,
-                    parse_mode="HTML",
-                    reply_markup=keyboard,
-                )
+            await message.answer(caption, parse_mode="HTML")
 
         except Exception as exc:
             await _handle_spotify_error(message, exc)
