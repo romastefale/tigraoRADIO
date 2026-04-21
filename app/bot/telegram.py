@@ -178,13 +178,14 @@ def _register_handlers(dp: Dispatcher) -> None:
                 return
 
             track_name = str(track.get("track_name") or "")
+            artist = str(track.get("artist") or "")
             spotify_url = str(track.get("spotify_url") or "")
             display_name = query.from_user.full_name or "Usuário"
             album_image_url = track.get("album_image_url") or "https://via.placeholder.com/512"
             caption = (
-                f"<b>{display_name} · ♫ "
+                f"<i>{display_name} · ♫ "
                 f"<a href=\"{spotify_url}\">{track_name}</a>"
-                f"</b>"
+                f" - {artist}</i>"
             )
 
             result = InlineQueryResultPhoto(
