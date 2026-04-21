@@ -3,10 +3,12 @@ import html
 import logging
 import random
 import re
+import time
 import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import httpx
 from sqlalchemy import text
 
 from aiogram import Dispatcher, F
@@ -21,6 +23,7 @@ from aiogram.types import (
     InlineKeyboardButton,
 )
 from app.bot.intent import detect_intent
+from app.config.settings import TELEGRAM_BOT_TOKEN
 from app.core.runtime import allow
 from app.db.database import SessionLocal
 from app.services.likes import likes_service
@@ -693,6 +696,83 @@ def _register_handlers(dp: Dispatcher) -> None:
             f"{chr(10).join(likes_lines)}"
         )
         await message.answer(response)
+
+    @dp.message(Command("healthfull"))
+    async def healthfull(message: Message) -> None:
+        if not message.from_user or message.from_user.id != 8505890439:
+            return
+
+        start = time.perf_counter()
+
+        telegram_status = "OK"
+        webhook_status = "OK"
+        database_status = "OK"
+        spotify_status = "OK"
+        flow_status = "OK"
+        pending_updates: int | None = None
+
+        try:
+            await message.bot.get_me()
+        except Exception:
+            telegram_status = "ERROR"
+
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                response = await client.get(
+                    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getWebhookInfo"
+                )
+                payload = response.json()
+                result = payload.get("result") if isinstance(payload, dict) else None
+                if not response.is_success or not isinstance(result, dict):
+                    webhook_status = "ERROR"
+                else:
+                    pending_value = result.get("pending_update_count")
+                    if isinstance(pending_value, int):
+                        pending_updates = pending_value
+                    if result.get("last_error_message"):
+                        webhook_status = "ERROR"
+        except Exception:
+            webhook_status = "ERROR"
+
+        try:
+            with SessionLocal() as db:
+                db.execute(text("SELECT 1"))
+        except Exception:
+            database_status = "ERROR"
+
+        track: dict[str, str | None] | None = None
+        user_id = message.from_user.id
+        try:
+            track = await spotify_service.get_current_or_last_played(user_id)
+            if not track:
+                spotify_status = "ERROR"
+        except Exception:
+            spotify_status = "ERROR"
+
+        if spotify_status == "OK":
+            track_name = _normalize_optional_text(track.get("track_name")) if track else None
+            artist = _normalize_optional_text(track.get("artist")) if track else None
+            if not track or not track_name or not artist:
+                flow_status = "ERROR"
+        else:
+            flow_status = "ERROR"
+
+        latency_ms = (time.perf_counter() - start) * 1000
+
+        lines = [
+            "HEALTH FULL",
+            "",
+            f"Telegram: {telegram_status}",
+            f"Webhook: {webhook_status}",
+            f"Database: {database_status}",
+            f"Spotify: {spotify_status}",
+            f"Flow: {flow_status}",
+            f"Latency: {latency_ms:.2f} ms",
+        ]
+        if pending_updates is not None:
+            lines.append(f"pending_updates: {pending_updates}")
+
+        await message.answer("\n".join(lines))
 
     @dp.message(Command("logout"))
     async def logout(message: Message) -> None:
