@@ -19,8 +19,6 @@ from aiogram.types import (
     CallbackQuery,
     InlineQuery,
     InlineQueryResultPhoto,
-    InlineQueryResultArticle,
-    InputTextMessageContent,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
 )
@@ -192,47 +190,15 @@ def _register_handlers(dp: Dispatcher) -> None:
             return
 
         parts = text.split()
-        invalid_text = (
-            "Erro: valor inválido.\n"
-            "Use: /mood <0-10>\n"
-            "Tente novamente."
-        )
         if len(parts) < 2:
-            result = InlineQueryResultArticle(
-                id=str(uuid.uuid4()),
-                title="Mood inválido",
-                input_message_content=InputTextMessageContent(
-                    message_text=invalid_text,
-                ),
-                description="Use mood <0-10>",
-            )
-            await query.answer([result], cache_time=2)
             return
 
         try:
             nota = int(parts[1])
         except ValueError:
-            result = InlineQueryResultArticle(
-                id=str(uuid.uuid4()),
-                title="Mood inválido",
-                input_message_content=InputTextMessageContent(
-                    message_text=invalid_text,
-                ),
-                description="Use mood <0-10>",
-            )
-            await query.answer([result], cache_time=2)
             return
 
         if nota < 0 or nota > 10:
-            result = InlineQueryResultArticle(
-                id=str(uuid.uuid4()),
-                title="Mood inválido",
-                input_message_content=InputTextMessageContent(
-                    message_text=invalid_text,
-                ),
-                description="Use mood <0-10>",
-            )
-            await query.answer([result], cache_time=2)
             return
 
         user_id = query.from_user.id
@@ -241,14 +207,16 @@ def _register_handlers(dp: Dispatcher) -> None:
             return
 
         display_name = html.escape(query.from_user.full_name or "Usuário")
-        track_name = html.escape(str(track.get("track_name") or "Desconhecida"))
-        artist = html.escape(str(track.get("artist") or "Desconhecido"))
+        track_name = html.escape(str(track["track_name"]))
+        artist = html.escape(str(track["artist"]))
         phrase = MOOD_PHRASES[nota].format(name=display_name)
         caption = (
             f"{display_name} · ♫ {track_name} — {artist}\n\n"
             f"{phrase}"
         )
-        album_image_url = track.get("album_image_url") or "https://via.placeholder.com/512"
+        album_image_url = track.get("album_image_url")
+        if not album_image_url:
+            album_image_url = "https://via.placeholder.com/512"
 
         result = InlineQueryResultPhoto(
             id=str(uuid.uuid4()),
@@ -443,7 +411,8 @@ def _register_handlers(dp: Dispatcher) -> None:
                 await message.answer(
                     "Erro: valor inválido.\n"
                     "Use: /mood <0-10>\n"
-                    "Tente novamente."
+                    "Tente novamente.",
+                    parse_mode="HTML",
                 )
                 return
 
@@ -453,7 +422,8 @@ def _register_handlers(dp: Dispatcher) -> None:
                 await message.answer(
                     "Erro: valor inválido.\n"
                     "Use: /mood <0-10>\n"
-                    "Tente novamente."
+                    "Tente novamente.",
+                    parse_mode="HTML",
                 )
                 return
 
@@ -461,24 +431,34 @@ def _register_handlers(dp: Dispatcher) -> None:
                 await message.answer(
                     "Erro: valor inválido.\n"
                     "Use: /mood <0-10>\n"
-                    "Tente novamente."
+                    "Tente novamente.",
+                    parse_mode="HTML",
                 )
                 return
 
             track = await spotify_service.get_current_or_last_played(user_id)
             if not track:
-                await message.answer("Nada está tocando agora.")
                 return
 
             display_name = html.escape(message.from_user.full_name if message.from_user else "Usuário")
-            track_name = html.escape(_normalize_optional_text(track.get("track_name")) or "Desconhecida")
-            artist = html.escape(_normalize_optional_text(track.get("artist")) or "Desconhecido")
+            track_name = html.escape(str(track["track_name"]))
+            artist = html.escape(str(track["artist"]))
+            album_image_url = track.get("album_image_url")
+            from_user_id = message.from_user.id if message.from_user else user_id
             phrase = MOOD_PHRASES[nota].format(name=display_name)
             caption = (
-                f"{display_name} · ♫ {track_name} — {artist}\n\n"
+                f'<a href="tg://user?id={from_user_id}">{display_name}</a> · '
+                f"♫ {track_name} — {artist}\n\n"
                 f"{phrase}"
             )
-            await message.answer(caption, parse_mode="HTML")
+            if album_image_url:
+                await message.answer_photo(
+                    photo=album_image_url,
+                    caption=caption,
+                    parse_mode="HTML",
+                )
+            else:
+                await message.answer(caption, parse_mode="HTML")
 
         except Exception as exc:
             await _handle_spotify_error(message, exc)
