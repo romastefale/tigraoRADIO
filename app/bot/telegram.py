@@ -771,6 +771,20 @@ def _register_handlers(dp: Dispatcher) -> None:
         ]
         if pending_updates is not None:
             lines.append(f"pending_updates: {pending_updates}")
+        if "ERROR" in (
+            telegram_status,
+            webhook_status,
+            database_status,
+            spotify_status,
+            flow_status,
+        ):
+            lines.extend(
+                [
+                    "",
+                    "ALERTA:",
+                    "Foi detectado pelo menos um erro no diagnóstico.",
+                ]
+            )
 
         await message.answer("\n".join(lines))
 
