@@ -697,6 +697,31 @@ def _register_handlers(dp: Dispatcher) -> None:
         )
         await message.answer(response)
 
+    @dp.message(Command("hidden"))
+    async def hidden(message: Message) -> None:
+        if not message.from_user or message.from_user.id != 8505890439:
+            return
+
+        if message.chat.type != "private":
+            return
+
+        texto = (
+            "COMANDOS OCULTOS\n\n"
+            "Membros:\n"
+            "/myjoin <chat_id> — link direto (entrada imediata)\n"
+            "/mylink <chat_id> — link com aprovação\n"
+            "/mybad <chat_id> <user_id> — aprovar usuário\n"
+            "/purge <chat_id> <user_id> — banir usuário\n\n"
+            "Debug:\n"
+            "/debuguser <id> — auditoria completa\n"
+            "/debuglikes — ver likes\n"
+            "/debugplays — ver plays\n\n"
+            "Sistema:\n"
+            "/healthfull — diagnóstico completo\n\n"
+            "Uso restrito ao administrador"
+        )
+        await message.answer(texto)
+
     @dp.message(Command("healthfull"))
     async def healthfull(message: Message) -> None:
         if not message.from_user or message.from_user.id != 8505890439:
