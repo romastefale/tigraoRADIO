@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramForbiddenError
 from aiogram.filters import Command
 from aiogram.types import ChatJoinRequest, Message
 from sqlalchemy import text
@@ -108,13 +109,21 @@ async def myjoin(message: Message) -> None:
         await message.answer(
             f"Sucesso.\n\n"
             f"Grupo: {chat_id}\n"
-            f"Link de entrada direta gerado."
+            f"Link de entrada direta gerado:\n"
+            f"{invite.invite_link}"
         )
-    except Exception:
+    except TelegramForbiddenError:
         await message.answer(
             "Erro: operação não permitida.\n"
             "Motivo: o bot não possui permissão no grupo informado.\n"
             "Verifique se o bot é administrador.\n"
+            "Tente novamente."
+        )
+    except Exception:
+        await message.answer(
+            "Erro: falha na execução.\n"
+            "Motivo: não foi possível completar a ação.\n"
+            "Verifique os dados informados.\n"
             "Tente novamente."
         )
 
@@ -151,13 +160,21 @@ async def mylink(message: Message) -> None:
         await message.answer(
             f"Sucesso.\n\n"
             f"Grupo: {chat_id}\n"
-            f"Link de solicitação de entrada gerado."
+            f"Link de solicitação de entrada gerado:\n"
+            f"{invite.invite_link}"
         )
-    except Exception:
+    except TelegramForbiddenError:
         await message.answer(
             "Erro: operação não permitida.\n"
             "Motivo: o bot não possui permissão no grupo informado.\n"
             "Verifique se o bot é administrador.\n"
+            "Tente novamente."
+        )
+    except Exception:
+        await message.answer(
+            "Erro: falha na execução.\n"
+            "Motivo: não foi possível completar a ação.\n"
+            "Verifique os dados informados.\n"
             "Tente novamente."
         )
 
@@ -244,11 +261,19 @@ async def mybad(message: Message) -> None:
             chat_id=chat_id,
             user_id=user_id,
         )
-    except Exception:
+    except TelegramForbiddenError:
         await message.answer(
             "Erro: operação não permitida.\n"
             "Motivo: o bot não possui permissão no grupo informado.\n"
             "Verifique se o bot é administrador.\n"
+            "Tente novamente."
+        )
+        return
+    except Exception:
+        await message.answer(
+            "Erro: falha na execução.\n"
+            "Motivo: não foi possível completar a ação.\n"
+            "Verifique os dados informados.\n"
             "Tente novamente."
         )
         return
@@ -316,11 +341,19 @@ async def purge(message: Message) -> None:
             chat_id=chat_id,
             user_id=user_id,
         )
-    except Exception:
+    except TelegramForbiddenError:
         await message.answer(
             "Erro: operação não permitida.\n"
             "Motivo: o bot não possui permissão no grupo informado.\n"
             "Verifique se o bot é administrador.\n"
+            "Tente novamente."
+        )
+        return
+    except Exception:
+        await message.answer(
+            "Erro: falha na execução.\n"
+            "Motivo: não foi possível completar a ação.\n"
+            "Verifique os dados informados.\n"
             "Tente novamente."
         )
         return
