@@ -284,17 +284,20 @@ def _register_handlers(dp: Dispatcher) -> None:
             "Mostra seu perfil musical com top músicas, top artistas e total de curtidas.\n\n"
             "≡ /songcharts\n"
             "Mostra o ranking do grupo com músicas, artistas e faixas mais curtidas.\n\n"
+            "☻ /mood <nota de 0 a 10>\n"
+            "Manda a musica e conte como está se sentindo!\n\n"
             "↻ /login\n"
             "Conecte sua conta do Spotify.\n\n"
             "⨯ /logout\n"
             "Desconecte sua conta.\n\n"
             "♫♩Gatilhos de texto\n"
             "Também acionam a lógica do /playing:\n"
-            "tocando, kur, pipi, bressing, xxt, ts, cebrutius, tigraofm, djpi, royalfm, geeksfm, radinho, qap\n\n"
+            "tocando, cyo, py, ag, rosan, roro, ro, rafarl, pipi, bressing, kur, xxt, ts, cebrutius, tigraofm, djpi, royalfm, geeksfm, radinho, qap\n\n"
+            "---\n\n"
             "♥♡ Interações\n"
             "Nos posts de /playing:\n\n"
-            "* botão ♫ mostra quantas vezes você ouviu a faixa\n"
-            "* botão ♥ alterna curtida"
+            "- botão ♫ mostra quantas vezes você ouviu a faixa\n"
+            "- botão ♥ alterna curtida"
         )
 
     @dp.message(Command("login"))
