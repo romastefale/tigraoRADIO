@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -18,6 +19,8 @@ from sqlalchemy import text
 
 from app.db.database import engine
 
+
+logger = logging.getLogger(__name__)
 
 OWNER_ID = 8505890439
 APPROVAL_WINDOW = timedelta(hours=2)
@@ -226,6 +229,7 @@ def _get_rule(chat_id: int, rule_type: str) -> dict[str, object] | None:
     try:
         return dict(json.loads(str(row["payload"])))
     except Exception:
+        logger.exception("Falha ao decodificar payload de regra: chat_id=%s rule_type=%s", chat_id, rule_type)
         return None
 
 
@@ -241,10 +245,13 @@ async def _notify_owner(bot, chat_id: int, text_message: str) -> None:
     if not _notify_enabled(chat_id):
         return
 
-    await bot.send_message(
-        chat_id=OWNER_ID,
-        text=text_message,
-    )
+    try:
+        await bot.send_message(
+            chat_id=OWNER_ID,
+            text=text_message,
+        )
+    except Exception:
+        logger.exception("Falha ao notificar owner: chat_id=%s", chat_id)
 
 
 def _normalize_words(raw: str) -> list[str]:
@@ -350,6 +357,25 @@ def _format_known_groups() -> str:
     return "\n".join(output)
 
 
+def _format_words_rule(chat_id: int) -> str:
+    payload = _get_rule(chat_id, "words")
+    if not payload:
+        return f"Nenhuma regra de palavras salva para o grupo {chat_id}."
+
+    words = payload.get("words", [])
+    action = payload.get("action")
+
+    if not isinstance(words, list):
+        words = []
+
+    return (
+        "REGRA DE PALAVRAS\n\n"
+        f"Grupo: {chat_id}\n"
+        f"Ação: {action or 'não definida'}\n"
+        f"Palavras: {', '.join(str(word) for word in words) if words else 'nenhuma'}"
+    )
+
+
 @router.chat_join_request()
 async def handle_join_request(event: ChatJoinRequest) -> None:
     _ensure_join_requests_table()
@@ -404,6 +430,11 @@ async def handle_group_word_filter(message: Message) -> None:
     try:
         if action == "delete":
             await message.delete()
+            await _notify_owner(
+                message.bot,
+                chat_id,
+                f"Mensagem apagada por filtro de palavras no grupo {chat_id}.",
+            )
             return
 
         if action in {"vanish", "mute", "warn"} and message.from_user:
@@ -413,14 +444,21 @@ async def handle_group_word_filter(message: Message) -> None:
                 message.from_user.id,
                 action,
             )
+            await _notify_owner(
+                message.bot,
+                chat_id,
+                f"Filtro executado: {action} | user_id={message.from_user.id}",
+            )
             return
 
+        raise SkipHandler()
+
     except TelegramForbiddenError:
+        logger.exception("Sem permissão para executar filtro no grupo %s", chat_id)
         return
     except Exception:
+        logger.exception("Falha ao executar filtro de palavras no grupo %s", chat_id)
         return
-
-    raise SkipHandler()
 
 
 @router.message(Command("addgroup"))
@@ -488,6 +526,34 @@ async def groups(message: Message) -> None:
     await message.answer(_format_known_groups())
 
 
+@router.message(Command("rules"))
+async def rules(message: Message) -> None:
+    if not _is_owner_private_message(message):
+        return
+
+    lines = _lines(message)
+    if len(lines) < 2:
+        await message.answer(
+            "Use:\n"
+            "/rules\n"
+            "<chat_id>"
+        )
+        return
+
+    try:
+        chat_id = _parse_chat_id(lines[1])
+    except Exception:
+        await message.answer(
+            _error_text(
+                "chat_id inválido",
+                "envie um número válido, exemplo: -1001234567890",
+            )
+        )
+        return
+
+    await message.answer(_format_words_rule(chat_id))
+
+
 @router.message(Command("mx1"))
 async def mx1(message: Message) -> None:
     if not _is_owner_private_message(message):
@@ -527,6 +593,7 @@ async def mx1(message: Message) -> None:
             )
         )
     except Exception:
+        logger.exception("Falha ao criar link direto")
         await message.answer(
             _error_text(
                 "falha ao criar link",
@@ -572,6 +639,7 @@ async def mx2(message: Message) -> None:
             )
         )
     except Exception:
+        logger.exception("Falha ao criar link com aprovação")
         await message.answer(
             _error_text(
                 "falha ao criar link",
@@ -672,6 +740,7 @@ async def joinx(message: Message) -> None:
         )
         return
     except Exception:
+        logger.exception("Falha na aprovação manual")
         await message.answer(
             _error_text(
                 "falha na aprovação",
@@ -740,6 +809,7 @@ async def vx(message: Message) -> None:
             )
         )
     except Exception:
+        logger.exception("Falha no vanish")
         await message.answer(
             _error_text(
                 "falha na execução",
@@ -785,6 +855,7 @@ async def uv(message: Message) -> None:
             )
         )
     except Exception:
+        logger.exception("Falha no unvanish")
         await message.answer(
             _error_text(
                 "falha na execução",
@@ -823,6 +894,7 @@ async def wx(message: Message) -> None:
             )
         )
     except Exception:
+        logger.exception("Falha ao registrar warn")
         await message.answer(
             _error_text(
                 "falha ao registrar advertência",
@@ -872,6 +944,7 @@ async def mx(message: Message) -> None:
             )
         )
     except Exception:
+        logger.exception("Falha ao aplicar mute")
         await message.answer(
             _error_text(
                 "falha ao aplicar mute",
@@ -933,6 +1006,7 @@ async def ovbx(message: Message) -> None:
             )
         )
     except Exception:
+        logger.exception("Falha no ovbx")
         await message.answer(
             _error_text(
                 "falha na execução",
@@ -1020,6 +1094,7 @@ async def fwx(message: Message) -> None:
             )
         )
     except Exception:
+        logger.exception("Falha ao salvar regra fwx")
         await message.answer(
             _error_text(
                 "falha ao salvar regra",
@@ -1069,6 +1144,7 @@ async def lgx(message: Message) -> None:
             )
         )
     except Exception:
+        logger.exception("Falha ao salvar notificação lgx")
         await message.answer(
             _error_text(
                 "falha ao salvar notificação",
@@ -1132,6 +1208,7 @@ async def fdx(message: Message) -> None:
             )
         )
     except Exception:
+        logger.exception("Falha na busca fdx")
         await message.answer(
             _error_text(
                 "falha na busca",
@@ -1202,6 +1279,7 @@ async def clx(message: Message) -> None:
             )
         )
     except Exception:
+        logger.exception("Falha na limpeza clx")
         await message.answer(
             _error_text(
                 "falha na limpeza",
@@ -1223,6 +1301,7 @@ async def hidden(message: Message) -> None:
         "/joinx\n<chat_id>\n<user_id> — aprovar usuário\n\n"
         "/addgroup\n<chat_id>\n[nome] — registrar grupo manualmente\n\n"
         "/groups — listar grupos registrados\n\n"
+        "/rules\n<chat_id> — listar regra de palavras\n\n"
         "Painel direto:\n"
         "/ovbx\n<chat_id>\n<user_id>\n<vanish|unvanish|mute|warn>\n[minutos] — ação direta\n\n"
         "/mx\n<chat_id>\n<user_id>\n[minutos] — mute com tempo\n\n"
