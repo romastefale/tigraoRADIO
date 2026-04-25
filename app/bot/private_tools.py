@@ -6,7 +6,6 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
-from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.exceptions import TelegramForbiddenError
 from aiogram.filters import Command
 from aiogram.types import (
@@ -423,8 +422,6 @@ async def handle_group_word_filter(message: Message) -> None:
         return
 
     text_lower = text_value.lower()
-
-    # 🔥 CORREÇÃO REAL: match simples (sem regex restritiva)
     if not any(str(word).lower() in text_lower for word in words):
         return
 
@@ -441,42 +438,6 @@ async def handle_group_word_filter(message: Message) -> None:
                 action,
             )
             return
-
-    except TelegramForbiddenError:
-        logger.exception("Sem permissão para deletar mensagem no grupo %s", chat_id)
-        return
-    except Exception:
-        logger.exception("Erro no filtro de palavras no grupo %s", chat_id)
-        return
-
-    if not _word_matches(text_lower, words):
-        raise SkipHandler()
-
-    try:
-        if action == "delete":
-            await message.delete()
-            await _notify_owner(
-                message.bot,
-                chat_id,
-                f"Mensagem apagada por filtro de palavras no grupo {chat_id}.",
-            )
-            return
-
-        if action in {"vanish", "mute", "warn"} and message.from_user:
-            await _execute_action(
-                message.bot,
-                chat_id,
-                message.from_user.id,
-                action,
-            )
-            await _notify_owner(
-                message.bot,
-                chat_id,
-                f"Filtro executado: {action} | user_id={message.from_user.id}",
-            )
-            return
-
-        raise SkipHandler()
 
     except TelegramForbiddenError:
         logger.exception("Sem permissão para executar filtro no grupo %s", chat_id)
