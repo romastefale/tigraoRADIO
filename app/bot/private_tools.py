@@ -409,20 +409,45 @@ async def handle_group_word_filter(message: Message) -> None:
 
     text_value = message.text or message.caption or ""
     if not text_value:
-        raise SkipHandler()
+        return
 
     chat_id = message.chat.id
     payload = _get_rule(chat_id, "words")
     if not payload:
-        raise SkipHandler()
+        return
 
     words = payload.get("words", [])
     action = str(payload.get("action") or "").strip().lower()
 
     if not isinstance(words, list) or not words or not action:
-        raise SkipHandler()
+        return
 
     text_lower = text_value.lower()
+
+    # 🔥 CORREÇÃO REAL: match simples (sem regex restritiva)
+    if not any(str(word).lower() in text_lower for word in words):
+        return
+
+    try:
+        if action == "delete":
+            await message.delete()
+            return
+
+        if action in {"vanish", "mute", "warn"} and message.from_user:
+            await _execute_action(
+                message.bot,
+                chat_id,
+                message.from_user.id,
+                action,
+            )
+            return
+
+    except TelegramForbiddenError:
+        logger.exception("Sem permissão para deletar mensagem no grupo %s", chat_id)
+        return
+    except Exception:
+        logger.exception("Erro no filtro de palavras no grupo %s", chat_id)
+        return
 
     if not _word_matches(text_lower, words):
         raise SkipHandler()
