@@ -252,6 +252,19 @@ def _normalize_words(raw: str) -> list[str]:
     return list(dict.fromkeys(words))
 
 
+def _word_matches(text_lower: str, words: list[object]) -> bool:
+    for raw_word in words:
+        word = str(raw_word).strip().lower()
+        if not word:
+            continue
+
+        pattern = rf"(?<!\w){re.escape(word)}(?!\w)"
+        if re.search(pattern, text_lower):
+            return True
+
+    return False
+
+
 def _add_warn(chat_id: int, user_id: int, reason: str) -> None:
     _ensure_warns_table()
 
@@ -316,11 +329,6 @@ def _lines(message: Message) -> list[str]:
     return [line.strip() for line in (message.text or "").splitlines() if line.strip()]
 
 
-def _command_name(line: str) -> str:
-    first = line.split()[0].lower()
-    return first.split("@", 1)[0]
-
-
 def _parse_chat_id(value: str) -> int:
     return int(value.strip())
 
@@ -370,40 +378,49 @@ async def handle_my_chat_member(event: ChatMemberUpdated) -> None:
 
 
 @router.message(F.chat.type.in_({"group", "supergroup"}))
-async def handle_word_filter(message: Message) -> None:
-    if not message.text:
-        return
+async def handle_group_word_filter(message: Message) -> None:
+    _remember_group(message.chat.id, message.chat.title or str(message.chat.id))
+
+    text_value = message.text or message.caption or ""
+    if not text_value:
+        raise SkipHandler()
 
     chat_id = message.chat.id
     payload = _get_rule(chat_id, "words")
     if not payload:
-        return
+        raise SkipHandler()
 
     words = payload.get("words", [])
-    action = payload.get("action")
+    action = str(payload.get("action") or "").strip().lower()
 
-    if not words or not action:
+    if not isinstance(words, list) or not words or not action:
+        raise SkipHandler()
+
+    text_lower = text_value.lower()
+
+    if not _word_matches(text_lower, words):
+        raise SkipHandler()
+
+    try:
+        if action == "delete":
+            await message.delete()
+            return
+
+        if action in {"vanish", "mute", "warn"} and message.from_user:
+            await _execute_action(
+                message.bot,
+                chat_id,
+                message.from_user.id,
+                action,
+            )
+            return
+
+    except TelegramForbiddenError:
+        return
+    except Exception:
         return
 
-    text_lower = message.text.lower()
-
-    if any(word in text_lower for word in words):
-        try:
-            if action == "delete":
-                await message.delete()
-
-            elif action in {"vanish", "mute", "warn"}:
-                await _execute_action(
-                    message.bot,
-                    chat_id,
-                    message.from_user.id,
-                    action,
-                )
-
-        except TelegramForbiddenError:
-            pass
-        except Exception:
-            pass
+    raise SkipHandler()
 
 
 @router.message(Command("addgroup"))
@@ -938,7 +955,7 @@ async def fwx(message: Message) -> None:
             "/fwx\n"
             "<chat_id>\n"
             "<add|remove>\n"
-            "<vanish|mute|warn|delete>\n"
+            "<delete|vanish|mute|warn>\n"
             "<palavras separadas por vírgula, ponto e vírgula ou quebra de linha>"
         )
         return
@@ -958,11 +975,11 @@ async def fwx(message: Message) -> None:
             )
             return
 
-        if action not in {"vanish", "mute", "warn", "delete"}:
+        if action not in {"delete", "vanish", "mute", "warn"}:
             await message.answer(
                 _error_text(
                     "punição inválida",
-                    "use vanish, mute ou warn",
+                    "use delete, vanish, mute ou warn",
                 )
             )
             return
@@ -1213,7 +1230,7 @@ async def hidden(message: Message) -> None:
         "/vx\n<chat_id>\n<user_id> — vanish\n\n"
         "/uv\n<chat_id>\n<user_id> — unvanish\n\n"
         "Regras:\n"
-        "/fwx\n<chat_id>\n<add|remove>\n<vanish|mute|warn>\n<palavras> — palavras\n\n"
+        "/fwx\n<chat_id>\n<add|remove>\n<delete|vanish|mute|warn>\n<palavras> — palavras\n\n"
         "/clx\n<chat_id>\n<warns|rules|old_requests> — limpeza\n\n"
         "/lgx\n<chat_id>\n<on|off> — notificações\n\n"
         "/fdx\n<chat_id>\n<termo> — busca\n\n"
