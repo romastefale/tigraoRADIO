@@ -370,11 +370,40 @@ async def handle_my_chat_member(event: ChatMemberUpdated) -> None:
 
 
 @router.message(F.chat.type.in_({"group", "supergroup"}))
-async def _auto_register_group(message: Message) -> None:
-    try:
-        _remember_group(message.chat.id, message.chat.title or str(message.chat.id))
-    finally:
-        raise SkipHandler()
+async def handle_word_filter(message: Message) -> None:
+    if not message.text:
+        return
+
+    chat_id = message.chat.id
+    payload = _get_rule(chat_id, "words")
+    if not payload:
+        return
+
+    words = payload.get("words", [])
+    action = payload.get("action")
+
+    if not words or not action:
+        return
+
+    text_lower = message.text.lower()
+
+    if any(word in text_lower for word in words):
+        try:
+            if action == "delete":
+                await message.delete()
+
+            elif action in {"vanish", "mute", "warn"}:
+                await _execute_action(
+                    message.bot,
+                    chat_id,
+                    message.from_user.id,
+                    action,
+                )
+
+        except TelegramForbiddenError:
+            pass
+        except Exception:
+            pass
 
 
 @router.message(Command("addgroup"))
@@ -909,7 +938,7 @@ async def fwx(message: Message) -> None:
             "/fwx\n"
             "<chat_id>\n"
             "<add|remove>\n"
-            "<vanish|mute|warn>\n"
+            "<vanish|mute|warn|delete>\n"
             "<palavras separadas por vírgula, ponto e vírgula ou quebra de linha>"
         )
         return
@@ -929,7 +958,7 @@ async def fwx(message: Message) -> None:
             )
             return
 
-        if action not in {"vanish", "mute", "warn"}:
+        if action not in {"vanish", "mute", "warn", "delete"}:
             await message.answer(
                 _error_text(
                     "punição inválida",
