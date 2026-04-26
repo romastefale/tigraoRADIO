@@ -10,6 +10,7 @@ from aiogram import Bot
 from aiogram.types import Update
 
 from app.bot.private_tools import router as private_router
+from app.handlers.lili_rodou import router as lili_rodou_router
 from app.bot.telegram import _register_handlers, shutdown_telegram_bot, bot_dispatcher
 from app.config.settings import BASE_URL, TELEGRAM_BOT_TOKEN
 from app.db.database import engine, init_db, run_migrations
@@ -44,6 +45,7 @@ async def on_startup() -> None:
         bot = Bot(token=TELEGRAM_BOT_TOKEN)
         if not _telegram_dispatcher_configured:
             bot_dispatcher.include_router(private_router)
+            bot_dispatcher.include_router(lili_rodou_router)
             _register_handlers(bot_dispatcher)
             _telegram_dispatcher_configured = True
         await bot.set_webhook(f"{BASE_URL}/webhook")
