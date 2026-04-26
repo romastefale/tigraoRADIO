@@ -9,6 +9,7 @@ router = Router()
 
 
 KICK_RESET_DELAY_SECONDS = 1
+INVITE_LINK_NAME = "vvv-reset-link"
 
 
 def parse_payload(text: str | None) -> tuple[int | None, int | None]:
@@ -30,6 +31,15 @@ async def kick_reset_user(bot, chat_id: int, user_id: int) -> None:
     await bot.unban_chat_member(chat_id=chat_id, user_id=user_id, only_if_banned=True)
 
 
+async def create_direct_invite_link(bot, chat_id: int) -> str:
+    invite = await bot.create_chat_invite_link(
+        chat_id=chat_id,
+        name=INVITE_LINK_NAME,
+        creates_join_request=False,
+    )
+    return invite.invite_link
+
+
 @router.message(Command("vvv"))
 async def vvv(message: types.Message) -> None:
     if message.chat.type != "private":
@@ -37,9 +47,41 @@ async def vvv(message: types.Message) -> None:
 
     chat_id, user_id = parse_payload(message.text)
     if not chat_id or not user_id:
+        await message.answer(
+            "Não deu certo.\n\n"
+            "Erro: formato inválido.\n"
+            "Use:\n"
+            "/vvv\n"
+            "<chat_id>\n"
+            "<user_id>"
+        )
         return
 
     try:
         await kick_reset_user(message.bot, chat_id, user_id)
-    except Exception:
-        pass
+    except Exception as exc:
+        await message.answer(
+            "Não deu certo.\n\n"
+            "Erro no kick-reset: não consegui remover e liberar o usuário.\n"
+            f"Detalhe técnico: {type(exc).__name__}: {exc}"
+        )
+        return
+
+    try:
+        invite_link = await create_direct_invite_link(message.bot, chat_id)
+    except Exception as exc:
+        await message.answer(
+            "Parcialmente bem-sucedido.\n\n"
+            "O usuário foi removido e liberado para voltar, mas eu não consegui criar o link direto de entrada.\n"
+            f"Detalhe técnico: {type(exc).__name__}: {exc}"
+        )
+        return
+
+    await message.answer(
+        "Bem-sucedido.\n\n"
+        "O Group Help fez besteira, então eu resetei a entrada desse usuário de forma segura.\n"
+        "O usuário foi removido, liberado novamente e agora pode entrar pelo link direto abaixo.\n\n"
+        f"Grupo: {chat_id}\n"
+        f"Usuário: {user_id}\n"
+        f"Link direto: {invite_link}"
+    )
