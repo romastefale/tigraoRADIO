@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
@@ -75,6 +74,23 @@ def _ensure_group_rules_table() -> None:
         )
 
 
+def _ensure_dxx_filters_table() -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS dxx_filters (
+                    chat_id INTEGER,
+                    word TEXT,
+                    action TEXT,
+                    updated_at DATETIME,
+                    PRIMARY KEY (chat_id, word)
+                );
+                """
+            )
+        )
+
+
 def _ensure_warns_table() -> None:
     with engine.begin() as conn:
         conn.execute(
@@ -95,6 +111,7 @@ def _ensure_all_tables() -> None:
     _ensure_join_requests_table()
     _ensure_known_groups_table()
     _ensure_group_rules_table()
+    _ensure_dxx_filters_table()
     _ensure_warns_table()
 
 
@@ -254,21 +271,62 @@ async def _notify_owner(bot, chat_id: int, text_message: str) -> None:
 
 
 def _normalize_words(raw: str) -> list[str]:
-    words = [item.strip().lower() for item in re.split(r"[,;\n]", raw) if item.strip()]
+    normalized = raw.replace(";", ",").replace("\n", ",")
+    words = [item.strip().lower() for item in normalized.split(",") if item.strip()]
     return list(dict.fromkeys(words))
 
 
-def _word_matches(text_lower: str, words: list[object]) -> bool:
-    for raw_word in words:
-        word = str(raw_word).strip().lower()
-        if not word:
-            continue
+def _save_dxx_filters(chat_id: int, action: str, words: list[str]) -> None:
+    _ensure_dxx_filters_table()
 
-        pattern = rf"(?<!\w){re.escape(word)}(?!\w)"
-        if re.search(pattern, text_lower):
-            return True
+    with engine.begin() as conn:
+        conn.execute(
+            text("DELETE FROM dxx_filters WHERE chat_id = :chat_id"),
+            {"chat_id": chat_id},
+        )
+        for word in words:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO dxx_filters (chat_id, word, action, updated_at)
+                    VALUES (:chat_id, :word, :action, :updated_at)
+                    """
+                ),
+                {
+                    "chat_id": chat_id,
+                    "word": word,
+                    "action": action,
+                    "updated_at": datetime.now(timezone.utc),
+                },
+            )
 
-    return False
+
+def _get_dxx_filters(chat_id: int) -> tuple[str | None, list[str]]:
+    _ensure_dxx_filters_table()
+
+    with engine.begin() as conn:
+        rows = (
+            conn.execute(
+                text(
+                    """
+                    SELECT word, action
+                    FROM dxx_filters
+                    WHERE chat_id = :chat_id
+                    ORDER BY word ASC
+                    """
+                ),
+                {"chat_id": chat_id},
+            )
+            .mappings()
+            .all()
+        )
+
+    if not rows:
+        return None, []
+
+    words = [str(row["word"]).strip().lower() for row in rows if row.get("word")]
+    action = str(rows[0].get("action") or "").strip().lower() or None
+    return action, list(dict.fromkeys(words))
 
 
 def _add_warn(chat_id: int, user_id: int, reason: str) -> None:
@@ -357,21 +415,15 @@ def _format_known_groups() -> str:
 
 
 def _format_words_rule(chat_id: int) -> str:
-    payload = _get_rule(chat_id, "words")
-    if not payload:
-        return f"Nenhuma regra de palavras salva para o grupo {chat_id}."
-
-    words = payload.get("words", [])
-    action = payload.get("action")
-
-    if not isinstance(words, list):
-        words = []
+    action, words = _get_dxx_filters(chat_id)
+    if not words:
+        return "Nenhuma regra /dxx salva para este grupo."
 
     return (
-        "REGRA DE PALAVRAS\n\n"
+        "DXX FILTERS\n"
         f"Grupo: {chat_id}\n"
         f"Ação: {action or 'não definida'}\n"
-        f"Palavras: {', '.join(str(word) for word in words) if words else 'nenhuma'}"
+        f"Palavras: {', '.join(words)}"
     )
 
 
@@ -410,19 +462,13 @@ async def handle_group_word_filter(message: Message) -> None:
     if not text_value:
         return
 
-    chat_id = message.chat.id
-    payload = _get_rule(chat_id, "words")
-    if not payload:
-        return
-
-    words = payload.get("words", [])
-    action = str(payload.get("action") or "").strip().lower()
-
-    if not isinstance(words, list) or not words or not action:
+    action, words = _get_dxx_filters(message.chat.id)
+    if not words or not action:
         return
 
     text_lower = text_value.lower()
-    if not any(str(word).lower() in text_lower for word in words):
+    matched = any(word in text_lower for word in words)
+    if not matched:
         return
 
     try:
@@ -430,20 +476,18 @@ async def handle_group_word_filter(message: Message) -> None:
             await message.delete()
             return
 
-        if action in {"vanish", "mute", "warn"} and message.from_user:
-            await _execute_action(
-                message.bot,
-                chat_id,
-                message.from_user.id,
-                action,
+        if action == "vanish" and message.from_user:
+            await message.bot.ban_chat_member(
+                chat_id=message.chat.id,
+                user_id=message.from_user.id,
             )
             return
 
     except TelegramForbiddenError:
-        logger.exception("Sem permissão para executar filtro no grupo %s", chat_id)
+        logger.exception("Sem permissão para executar filtro no grupo %s", message.chat.id)
         return
     except Exception:
-        logger.exception("Falha ao executar filtro de palavras no grupo %s", chat_id)
+        logger.exception("Falha ao executar filtro de palavras no grupo %s", message.chat.id)
         return
 
 
@@ -510,6 +554,52 @@ async def groups(message: Message) -> None:
         return
 
     await message.answer(_format_known_groups())
+
+
+@router.message(Command("dxx"))
+async def dxx(message: Message) -> None:
+    if not _is_owner_private_message(message):
+        return
+
+    lines = _lines(message)
+    if len(lines) < 4:
+        await message.answer(
+            "Use:\n"
+            "/dxx\n"
+            "<chat_id>\n"
+            "<delete|vanish>\n"
+            "<palavras separadas por vírgula, ponto e vírgula ou quebra de linha>"
+        )
+        return
+
+    try:
+        chat_id = _parse_chat_id(lines[1])
+    except Exception:
+        await message.answer("chat_id inválido")
+        return
+
+    action = lines[2].strip().lower()
+    if action not in {"delete", "vanish"}:
+        await message.answer("Ação inválida. Use delete ou vanish.")
+        return
+
+    words = _normalize_words("\n".join(lines[3:]))
+    if not words:
+        await message.answer("Nenhuma palavra válida informada.")
+        return
+
+    try:
+        _save_dxx_filters(chat_id, action, words)
+        _remember_group(chat_id, str(chat_id))
+        await message.answer(
+            _success_text(
+                "Filtro /dxx salvo.",
+                f"Grupo: {chat_id}\nAção: {action}\nPalavras: {', '.join(words)}",
+            )
+        )
+    except Exception:
+        logger.exception("Falha ao salvar /dxx")
+        await message.answer("Erro ao salvar /dxx.")
 
 
 @router.message(Command("rules"))
@@ -850,45 +940,6 @@ async def uv(message: Message) -> None:
         )
 
 
-@router.message(Command("wx"))
-async def wx(message: Message) -> None:
-    if not _is_owner_private_message(message):
-        return
-
-    lines = _lines(message)
-    if len(lines) < 3:
-        await message.answer(
-            "Título: Warn\n"
-            "Descrição: Registra advertência interna sem remover usuário.\n\n"
-            "Use:\n"
-            "/wx\n"
-            "<chat_id>\n"
-            "<user_id>"
-        )
-        return
-
-    try:
-        chat_id = _parse_chat_id(lines[1])
-        user_id = _parse_user_id(lines[2])
-        _add_warn(chat_id, user_id, "manual_warn")
-        _remember_group(chat_id, str(chat_id))
-        await _notify_owner(message.bot, chat_id, f"Warn registrado | user_id={user_id}")
-        await message.answer(
-            _success_text(
-                "Advertência registrada.",
-                f"Grupo: {chat_id}\nUsuário: {user_id}",
-            )
-        )
-    except Exception:
-        logger.exception("Falha ao registrar warn")
-        await message.answer(
-            _error_text(
-                "falha ao registrar advertência",
-                "verifique chat_id e user_id",
-            )
-        )
-
-
 @router.message(Command("mx"))
 async def mx(message: Message) -> None:
     if not _is_owner_private_message(message):
@@ -953,7 +1004,7 @@ async def ovbx(message: Message) -> None:
             "/ovbx\n"
             "<chat_id>\n"
             "<user_id>\n"
-            "<vanish|unvanish|mute|warn>\n"
+            "<vanish|unvanish|mute>\n"
             "<minutos opcional para mute>"
         )
         return
@@ -963,11 +1014,11 @@ async def ovbx(message: Message) -> None:
         user_id = _parse_user_id(lines[2])
         action = lines[3].strip().lower()
 
-        if action not in {"vanish", "unvanish", "mute", "warn"}:
+        if action not in {"vanish", "unvanish", "mute"}:
             await message.answer(
                 _error_text(
                     "ação inválida",
-                    "use vanish, unvanish, mute ou warn",
+                    "use vanish, unvanish ou mute",
                 )
             )
             return
@@ -997,94 +1048,6 @@ async def ovbx(message: Message) -> None:
             _error_text(
                 "falha na execução",
                 "verifique chat_id, user_id, ação e permissões do bot",
-            )
-        )
-
-
-@router.message(Command("fwx"))
-async def fwx(message: Message) -> None:
-    if not _is_owner_private_message(message):
-        return
-
-    lines = _lines(message)
-    if len(lines) < 5:
-        await message.answer(
-            "Título: Filtro de palavras\n"
-            "Descrição: Adiciona ou remove palavras proibidas e define punição padrão.\n\n"
-            "Use:\n"
-            "/fwx\n"
-            "<chat_id>\n"
-            "<add|remove>\n"
-            "<delete|vanish|mute|warn>\n"
-            "<palavras separadas por vírgula, ponto e vírgula ou quebra de linha>"
-        )
-        return
-
-    try:
-        chat_id = _parse_chat_id(lines[1])
-        mode = lines[2].strip().lower()
-        action = lines[3].strip().lower()
-        raw_words = "\n".join(lines[4:])
-
-        if mode not in {"add", "remove"}:
-            await message.answer(
-                _error_text(
-                    "modo inválido",
-                    "use add ou remove",
-                )
-            )
-            return
-
-        if action not in {"delete", "vanish", "mute", "warn"}:
-            await message.answer(
-                _error_text(
-                    "punição inválida",
-                    "use delete, vanish, mute ou warn",
-                )
-            )
-            return
-
-        incoming_words = _normalize_words(raw_words)
-        if not incoming_words:
-            await message.answer(
-                _error_text(
-                    "nenhuma palavra válida",
-                    "envie palavras separadas por vírgula, ponto e vírgula ou quebra de linha",
-                )
-            )
-            return
-
-        current = _get_rule(chat_id, "words") or {"words": [], "action": action}
-        current_words = _normalize_words("\n".join(str(word) for word in current.get("words", [])))
-
-        if mode == "add":
-            final_words = list(dict.fromkeys(current_words + incoming_words))
-        else:
-            remove_set = set(incoming_words)
-            final_words = [word for word in current_words if word not in remove_set]
-
-        _save_rule(
-            chat_id,
-            "words",
-            {
-                "words": final_words,
-                "action": action,
-            },
-        )
-        _remember_group(chat_id, str(chat_id))
-
-        await message.answer(
-            _success_text(
-                "Regra de palavras salva.",
-                f"Grupo: {chat_id}\nModo: {mode}\nPunição: {action}\nTotal de palavras: {len(final_words)}",
-            )
-        )
-    except Exception:
-        logger.exception("Falha ao salvar regra fwx")
-        await message.answer(
-            _error_text(
-                "falha ao salvar regra",
-                "verifique chat_id, modo, punição e palavras",
             )
         )
 
@@ -1280,25 +1243,21 @@ async def hidden(message: Message) -> None:
         return
 
     await message.answer(
-        "COMANDOS OCULTOS\n\n"
-        "Membros:\n"
-        "/mx1\n<chat_id> — link direto\n\n"
-        "/mx2\n<chat_id> — link com aprovação\n\n"
-        "/joinx\n<chat_id>\n<user_id> — aprovar usuário\n\n"
-        "/addgroup\n<chat_id>\n[nome] — registrar grupo manualmente\n\n"
-        "/groups — listar grupos registrados\n\n"
-        "/rules\n<chat_id> — listar regra de palavras\n\n"
-        "Painel direto:\n"
-        "/ovbx\n<chat_id>\n<user_id>\n<vanish|unvanish|mute|warn>\n[minutos] — ação direta\n\n"
-        "/mx\n<chat_id>\n<user_id>\n[minutos] — mute com tempo\n\n"
-        "/wx\n<chat_id>\n<user_id> — warn\n\n"
+        "COMANDOS ATIVOS\n\n"
+        "MODERAÇÃO:\n"
+        "/dxx\n<chat_id>\n<delete|vanish>\n<palavras> — filtro automático de palavras\n\n"
         "/vx\n<chat_id>\n<user_id> — vanish\n\n"
         "/uv\n<chat_id>\n<user_id> — unvanish\n\n"
-        "Regras:\n"
-        "/fwx\n<chat_id>\n<add|remove>\n<delete|vanish|mute|warn>\n<palavras> — palavras\n\n"
-        "/clx\n<chat_id>\n<warns|rules|old_requests> — limpeza\n\n"
-        "/lgx\n<chat_id>\n<on|off> — notificações\n\n"
-        "/fdx\n<chat_id>\n<termo> — busca\n\n"
+        "/mx\n<chat_id>\n<user_id>\n[minutos] — mute\n\n"
+        "/ovbx\n<chat_id>\n<user_id>\n<vanish|unvanish|mute>\n[minutos] — ação direta\n\n"
+        "ACESSO:\n"
+        "/mx1\n<chat_id> — link direto\n\n"
+        "/mx2\n<chat_id> — link com aprovação\n\n"
+        "/joinx\n<chat_id>\n<user_id> — aprovar solicitação\n\n"
+        "GRUPOS:\n"
+        "/addgroup\n<chat_id>\n[nome] — registrar grupo\n\n"
+        "/groups — listar grupos\n\n"
+        "/rules\n<chat_id> — listar filtro /dxx\n\n"
         "Sistema:\n"
-        "/healthfull — diagnóstico completo"
+        "/hidden"
     )

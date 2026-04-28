@@ -373,35 +373,48 @@ def _register_handlers(dp: Dispatcher) -> None:
 
     @dp.message(Command("kingplay"))
     async def kingplay(message: Message) -> None:
-        user_id = message.from_user.id if message.from_user else 0
+        if not message.from_user:
+            return
+
+        parts = (message.text or "").splitlines()
+        if len(parts) < 2:
+            await message.answer("Use:\n/kingplay\n<chat_id>")
+            return
+
         try:
-            target_chat_id = message.chat.id
-            if message.chat.type == "private":
-                parts = (message.text or "").split(maxsplit=1)
-                if len(parts) < 2:
-                    await message.answer("Uso: /kingplay <chat_id>")
-                    return
-                target_chat_id = int(parts[1].strip())
-                chat = await message.bot.get_chat(target_chat_id)
-                group_name_raw = _normalize_optional_text(chat.title)
-            else:
-                group_name_raw = _normalize_optional_text(message.chat.title)
+            target_chat_id = int(parts[1].strip())
+        except Exception:
+            await message.answer("chat_id inválido")
+            return
 
-            track = await spotify_service.get_current_or_last_played(user_id)
-            if not track:
-                await message.answer("Nada está tocando agora.")
-                return
+        try:
+            chat = await message.bot.get_chat(target_chat_id)
+            group_name_raw = _normalize_optional_text(chat.title)
+        except Exception:
+            group_name_raw = _normalize_optional_text(str(target_chat_id))
 
-            track_name_raw = _normalize_optional_text(track.get("track_name"))
-            artist_name_raw = _normalize_optional_text(track.get("artist"))
+        try:
+            track = await spotify_service.get_current_or_last_played(message.from_user.id)
+        except Exception:
+            logger.exception("Falha Spotify no /kingplay")
+            await message.answer("Erro ao obter Spotify.")
+            return
 
-            track_name = html.escape(track_name_raw or "")
-            artist_name = html.escape(artist_name_raw or "")
-            group_name = html.escape(group_name_raw or "")
-            spotify_url = html.escape(str(track.get("spotify_url") or ""))
+        if not track:
+            await message.answer("Nada tocando.")
+            return
 
-            caption = f'<b><i>♫ {group_name} está ouvindo </i></b><a href="{spotify_url}"><b>{track_name}</b></a><b><i> — {artist_name}</i></b>'
+        track_name_raw = _normalize_optional_text(track.get("track_name"))
+        artist_name_raw = _normalize_optional_text(track.get("artist"))
 
+        track_name = html.escape(track_name_raw or "")
+        artist_name = html.escape(artist_name_raw or "")
+        group_name = html.escape(group_name_raw or "")
+        spotify_url = html.escape(str(track.get("spotify_url") or ""))
+
+        caption = f'<b><i>♫ {group_name} está ouvindo </i></b><a href="{spotify_url}"><b>{track_name}</b></a><b><i> — {artist_name}</i></b>'
+
+        try:
             album_image_url = track.get("album_image_url")
             if album_image_url:
                 sent = await message.bot.send_photo(
@@ -416,14 +429,19 @@ def _register_handlers(dp: Dispatcher) -> None:
                     text=caption,
                     parse_mode="HTML",
                 )
+        except Exception as exc:
+            logger.exception("Falha de envio no /kingplay", exc_info=exc)
+            await message.answer("Erro ao enviar mensagem no grupo.")
+            return
 
+        try:
             await message.bot.pin_chat_message(
                 chat_id=target_chat_id,
                 message_id=sent.message_id,
             )
-
-        except Exception as exc:
-            await _handle_spotify_error(message, exc)
+        except Exception:
+            logger.exception("Falha ao fixar /kingplay")
+            pass
 
 
     @dp.message(Command("mood"))
