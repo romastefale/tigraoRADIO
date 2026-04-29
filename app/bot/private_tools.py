@@ -420,15 +420,21 @@ def _format_known_groups() -> str:
 
 
 def _format_words_rule(chat_id: int) -> str:
-    action, words = _get_dxx_filters(chat_id)
-    if not words:
+    payload = _get_rule(chat_id, "words")
+    if not payload:
         return "Nenhuma regra /dxx salva para este grupo."
+
+    words = payload.get("words", [])
+    action = payload.get("action")
+
+    if not isinstance(words, list):
+        words = []
 
     return (
         "DXX FILTERS\n"
         f"Grupo: {chat_id}\n"
         f"Ação: {action or 'não definida'}\n"
-        f"Palavras: {', '.join(words)}"
+        f"Palavras: {', '.join(str(word) for word in words) if words else 'nenhuma'}"
     )
 
 
@@ -470,10 +476,10 @@ def _normalize_text(text: str) -> str:
 @router.message(F.chat.type.in_({"group", "supergroup"}))
 async def handle_group_word_filter(message: Message) -> None:
     if not (message.text or message.caption):
-        return
+        raise SkipHandler()
 
     if not message.from_user:
-        return
+        raise SkipHandler()
 
     _remember_group(message.chat.id, message.chat.title or str(message.chat.id))
 
@@ -482,13 +488,13 @@ async def handle_group_word_filter(message: Message) -> None:
     chat_id = message.chat.id
     payload = _get_rule(chat_id, "words")
     if not payload:
-        return
+        raise SkipHandler()
 
     words = payload.get("words", [])
     action = str(payload.get("action") or "").strip().lower()
 
     if not isinstance(words, list) or not words or not action:
-        return
+        raise SkipHandler()
 
     text_norm = _normalize_text(text_value)
 
@@ -499,10 +505,16 @@ async def handle_group_word_filter(message: Message) -> None:
             break
 
     if not matched:
-        return
+        raise SkipHandler()
 
     # não aplicar em administradores
     try:
+        member = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
+        if member.status in {"administrator", "creator"}:
+            raise SkipHandler()
+    except Exception:
+        logger.exception("Falha ao verificar admin no grupo %s", chat_id)
+        raise SkipHandler()
         member = await message.bot.get_chat_member(
             message.chat.id,
             message.from_user.id,
