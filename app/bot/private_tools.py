@@ -6,9 +6,8 @@ import unicodedata
 from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
-from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.exceptions import TelegramForbiddenError
-from aiogram.filters import Command
+from aiogram.filters import BaseFilter, Command
 from aiogram.types import (
     ChatJoinRequest,
     ChatMemberUpdated,
@@ -473,82 +472,69 @@ def _normalize_text(text: str) -> str:
     return "".join(c for c in text if unicodedata.category(c) != "Mn")
 
 
-@router.message(F.chat.type.in_({"group", "supergroup"}))
+
+
+class DxxWordFilter(BaseFilter):
+    async def __call__(self, message: Message) -> bool:
+        text_value = message.text or message.caption
+        if not text_value or not message.from_user:
+            return False
+
+        payload = _get_rule(message.chat.id, "words")
+        if not payload:
+            return False
+
+        words = payload.get("words", [])
+        if not isinstance(words, list) or not words:
+            return False
+
+        text_norm = _normalize_text(text_value)
+        return any(_normalize_text(str(word)) in text_norm for word in words)
+
+@router.message(F.chat.type.in_({"group", "supergroup"}), DxxWordFilter())
 async def handle_group_word_filter(message: Message) -> None:
-    if not (message.text or message.caption):
-        raise SkipHandler()
-
-    if not message.from_user:
-        raise SkipHandler()
-
     _remember_group(message.chat.id, message.chat.title or str(message.chat.id))
-
-    text_value = message.text or message.caption
 
     chat_id = message.chat.id
     payload = _get_rule(chat_id, "words")
     if not payload:
-        raise SkipHandler()
+        return
 
-    words = payload.get("words", [])
     action = str(payload.get("action") or "").strip().lower()
+    if action not in {"delete", "vanish"}:
+        return
 
-    if not isinstance(words, list) or not words or not action:
-        raise SkipHandler()
+    if not message.from_user:
+        return
 
-    text_norm = _normalize_text(text_value)
-
-    matched = False
-    for word in words:
-        if _normalize_text(str(word)) in text_norm:
-            matched = True
-            break
-
-    if not matched:
-        raise SkipHandler()
-
-    # não aplicar em administradores
     try:
-        member = await message.bot.get_chat_member(
-            message.chat.id,
-            message.from_user.id,
-        )
+        member = await message.bot.get_chat_member(chat_id, message.from_user.id)
     except Exception:
         logger.exception("Falha ao verificar admin no grupo %s", chat_id)
-        raise SkipHandler()
+        return
 
     if member.status in {"administrator", "creator"}:
-        raise SkipHandler()
+        return
 
     try:
         if action == "delete":
             await message.delete()
             return
 
-        if action in {"vanish", "mute", "warn"}:
-            await _execute_action(
-                message.bot,
-                chat_id,
-                message.from_user.id,
-                action,
-            )
-            return
-
-        raise SkipHandler()
-
-    except SkipHandler:
-        raise
-
+        await _execute_action(
+            message.bot,
+            chat_id,
+            message.from_user.id,
+            "vanish",
+        )
     except TelegramForbiddenError:
         logger.exception("Sem permissão no grupo %s", chat_id)
-        return
     except Exception:
         logger.exception(
             "Erro crítico no filtro de palavras | chat_id=%s | user_id=%s",
             chat_id,
             getattr(message.from_user, "id", None),
         )
-        return
 
 
 @router.message(Command("addgroup"))
