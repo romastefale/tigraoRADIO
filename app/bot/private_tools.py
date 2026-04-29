@@ -115,6 +115,30 @@ def _success_text(title: str, details: str) -> str:
     return f"Sucesso.\n\n{title}\n{details}"
 
 
+
+
+def _parse_duration(value: str):
+    value = value.strip().lower()
+
+    if value == "i":
+        return "indefinido"
+
+    if value == "x":
+        return "unmute"
+
+    if value.isdigit():
+        return timedelta(minutes=int(value))
+
+    if value.endswith("m"):
+        return timedelta(minutes=int(value[:-1]))
+
+    if value.endswith("h"):
+        return timedelta(hours=int(value[:-1]))
+
+    if value.endswith("d"):
+        return timedelta(days=int(value[:-1]))
+
+    raise ValueError("duração inválida")
 def _parse_created_at(value: object) -> datetime | None:
     if isinstance(value, datetime):
         if value.tzinfo is None:
@@ -838,17 +862,43 @@ async def mx(message: Message) -> None:
     try:
         chat_id = _parse_chat_id(lines[1])
         user_id = _parse_user_id(lines[2])
-        minutes = int(lines[3]) if len(lines) >= 4 else 10
-        minutes = max(1, min(minutes, 120))
+        duration_raw = lines[3] if len(lines) > 3 else "10m"
 
-        await _execute_action(message.bot, chat_id, user_id, "mute", minutes)
-        _remember_group(chat_id, str(chat_id))
-        await _notify_owner(message.bot, chat_id, f"Mute executado | user_id={user_id} | minutos={minutes}")
-        await message.answer(
-            _success_text(
-                "Mute executado.",
-                f"Grupo: {chat_id}\nUsuário: {user_id}\nTempo: {minutes} minutos",
+        try:
+            parsed = _parse_duration(duration_raw)
+        except Exception:
+            await message.answer("Duração inválida. Use: 10m, 2h, 3d, i ou x")
+            return
+
+        if parsed == "unmute":
+            await message.bot.restrict_chat_member(
+                chat_id=chat_id,
+                user_id=user_id,
+                permissions=ChatPermissions(
+                    can_send_messages=True,
+                    can_send_media_messages=True,
+                    can_send_other_messages=True,
+                    can_add_web_page_previews=True,
+                ),
             )
+
+            await message.answer(f"Usuário desmutado.\nUser: {user_id}")
+            return
+
+        if parsed == "indefinido":
+            until = None
+        else:
+            until = datetime.now(timezone.utc) + parsed
+
+        await message.bot.restrict_chat_member(
+            chat_id=chat_id,
+            user_id=user_id,
+            permissions=ChatPermissions(can_send_messages=False),
+            until_date=until,
+        )
+
+        await message.answer(
+            f"Usuário silenciado.\nUser: {user_id}\nTempo: {duration_raw}"
         )
     except TelegramForbiddenError:
         await message.answer(
