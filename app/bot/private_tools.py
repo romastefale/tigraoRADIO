@@ -357,6 +357,9 @@ async def _execute_action(
     action: str,
     duration_minutes: int | None = None,
 ) -> None:
+    if not user_id:
+        return
+
     if action == "vanish":
         await bot.ban_chat_member(
             chat_id=chat_id,
@@ -465,11 +468,15 @@ def _normalize_text(text: str) -> str:
 
 @router.message(F.chat.type.in_({"group", "supergroup"}))
 async def handle_group_word_filter(message: Message) -> None:
+    if not (message.text or message.caption):
+        return
+
+    if not message.from_user:
+        return
+
     _remember_group(message.chat.id, message.chat.title or str(message.chat.id))
 
     text_value = message.text or message.caption
-    if not text_value:
-        return
 
     chat_id = message.chat.id
     payload = _get_rule(chat_id, "words")
@@ -494,21 +501,20 @@ async def handle_group_word_filter(message: Message) -> None:
         return
 
     # não aplicar em administradores
-    if message.from_user:
-        try:
-            member = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
-            if member.status in {"administrator", "creator"}:
-                return
-        except Exception:
-            logger.exception("Falha ao verificar admin no grupo %s", chat_id)
+    try:
+        member = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
+        if member.status in {"administrator", "creator"}:
             return
+    except Exception:
+        logger.exception("Falha ao verificar admin no grupo %s", chat_id)
+        return
 
     try:
         if action == "delete":
             await message.delete()
             return
 
-        if action in {"vanish", "mute", "warn"} and message.from_user:
+        if action in {"vanish", "mute", "warn"}:
             await _execute_action(
                 message.bot,
                 chat_id,
@@ -521,7 +527,11 @@ async def handle_group_word_filter(message: Message) -> None:
         logger.exception("Sem permissão no grupo %s", chat_id)
         return
     except Exception:
-        logger.exception("Erro no filtro de palavras no grupo %s", chat_id)
+        logger.exception(
+            "Erro crítico no filtro de palavras | chat_id=%s | user_id=%s",
+            chat_id,
+            getattr(message.from_user, "id", None),
+        )
         return
 
 
@@ -1377,10 +1387,6 @@ async def ximg(message: Message) -> None:
         chat_id = _parse_chat_id(lines[1])
 
         photo = message.reply_to_message.photo[-1]
-        file = await message.bot.get_file(photo.file_id)
-        file_obj = await message.bot.download_file(file.file_path)
-        photo_bytes = file_obj.read() if hasattr(file_obj, "read") else file_obj
-
         if hasattr(photo, "file_size") and photo.file_size and photo.file_size > 10_000_000:
             await message.answer(
                 _error_text(
@@ -1389,6 +1395,10 @@ async def ximg(message: Message) -> None:
                 )
             )
             return
+
+        file = await message.bot.get_file(photo.file_id)
+        file_obj = await message.bot.download_file(file.file_path)
+        photo_bytes = file_obj.read() if hasattr(file_obj, "read") else file_obj
 
         await message.bot.set_chat_photo(
             chat_id=chat_id,
