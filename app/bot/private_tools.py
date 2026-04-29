@@ -595,44 +595,70 @@ async def dxx(message: Message) -> None:
         return
 
     lines = _lines(message)
+
     if len(lines) < 4:
         await message.answer(
+            "Título: Filtro rápido\n"
+            "Descrição: Define palavras proibidas com ação direta.\n\n"
             "Use:\n"
             "/dxx\n"
             "<chat_id>\n"
             "<delete|vanish>\n"
-            "<palavras separadas por vírgula, ponto e vírgula ou quebra de linha>"
+            "<palavras separadas por vírgula ou linha>"
         )
         return
 
     try:
         chat_id = _parse_chat_id(lines[1])
-    except Exception:
-        await message.answer("chat_id inválido")
-        return
+        action = lines[2].strip().lower()
 
-    action = lines[2].strip().lower()
-    if action not in {"delete", "vanish"}:
-        await message.answer("Ação inválida. Use delete ou vanish.")
-        return
+        if action not in {"delete", "vanish"}:
+            await message.answer(
+                _error_text(
+                    "ação inválida",
+                    "use delete ou vanish",
+                )
+            )
+            return
 
-    words = _normalize_words("\n".join(lines[3:]))
-    if not words:
-        await message.answer("Nenhuma palavra válida informada.")
-        return
+        raw_words = "\n".join(lines[3:])
+        words = _normalize_words(raw_words)
 
-    try:
-        _save_dxx_filters(chat_id, action, words)
+        if not words:
+            await message.answer(
+                _error_text(
+                    "nenhuma palavra válida",
+                    "informe ao menos uma palavra",
+                )
+            )
+            return
+
+        _save_rule(
+            chat_id,
+            "words",
+            {
+                "words": words,
+                "action": action,
+            },
+        )
+
         _remember_group(chat_id, str(chat_id))
+
         await message.answer(
             _success_text(
-                "Filtro /dxx salvo.",
-                f"Grupo: {chat_id}\nAção: {action}\nPalavras: {', '.join(words)}",
+                "Filtro configurado.",
+                f"Grupo: {chat_id}\nAção: {action}\nPalavras: {len(words)}",
             )
         )
+
     except Exception:
-        logger.exception("Falha ao salvar /dxx")
-        await message.answer("Erro ao salvar /dxx.")
+        logger.exception("Falha no comando dxx")
+        await message.answer(
+            _error_text(
+                "erro ao configurar filtro",
+                "verifique os dados e tente novamente",
+            )
+        )
 
 
 @router.message(Command("rules"))
