@@ -6,7 +6,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import text
 
-from aiogram import Bot
+from aiogram import Bot, Dispatcher
 from aiogram.types import Update
 
 from app.bot.private_tools import router as private_router
@@ -22,6 +22,7 @@ app = FastAPI(title="Minimal Backend")
 logger = logging.getLogger(__name__)
 
 bot: Bot | None = None
+dispatcher: Dispatcher = bot_dispatcher
 _telegram_dispatcher_configured = False
 
 
@@ -45,10 +46,10 @@ async def on_startup() -> None:
     if TELEGRAM_BOT_TOKEN:
         bot = Bot(token=TELEGRAM_BOT_TOKEN)
         if not _telegram_dispatcher_configured:
-            bot_dispatcher.include_router(private_router)
-            bot_dispatcher.include_router(lili_rodou_router)
-            bot_dispatcher.include_router(plus_router)
-            _register_handlers(bot_dispatcher)
+            dispatcher.include_router(private_router)
+            dispatcher.include_router(lili_rodou_router)
+            dispatcher.include_router(plus_router)
+            _register_handlers(dispatcher)
             _telegram_dispatcher_configured = True
         await bot.set_webhook(f"{BASE_URL}/webhook")
 
@@ -109,14 +110,21 @@ async def spotify_track(
     return await spotify_service.get_current_or_last_played(user_id)
 
 
-# 🔥 CORREÇÃO: ROTA DO WEBHOOK (ESSENCIAL)
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
-    print("WEBHOOK HIT")
-    if bot is None or bot_dispatcher is None:
-        return {"ok": False, "message": "Telegram bot is not configured"}
-    data = await request.json()
-    update = Update.model_validate(data)
-    print("DISPATCHING UPDATE")
-    await bot_dispatcher.feed_update(bot, update)
-    return {"ok": True}
+    try:
+        data = await request.json()
+
+        update = Update.model_validate(data)
+
+        if bot is None:
+            logger.error("Bot não inicializado")
+            return {"ok": True}
+
+        await dispatcher.feed_update(bot, update)
+
+        return {"ok": True}
+
+    except Exception:
+        logger.exception("Erro no webhook")
+        return {"ok": True}
