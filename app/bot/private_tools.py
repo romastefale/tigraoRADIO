@@ -1296,6 +1296,107 @@ async def clx(message: Message) -> None:
         )
 
 
+
+
+@router.message(Command("xend"))
+async def xend(message: Message) -> None:
+    if not _is_owner_private_message(message):
+        return
+
+    lines = _lines(message)
+    if len(lines) < 3:
+        await message.answer(
+            "Use:\n"
+            "/xend\n"
+            "<chat_id>\n"
+            "<mensagem>"
+        )
+        return
+
+    try:
+        chat_id = _parse_chat_id(lines[1])
+        text_message = "\n".join(lines[2:])
+
+        await message.bot.send_message(chat_id=chat_id, text=text_message)
+        await message.answer(
+            _success_text(
+                "Mensagem enviada.",
+                f"Destino: {chat_id}",
+            )
+        )
+    except TelegramForbiddenError:
+        await message.answer(
+            _error_text(
+                "operação não permitida",
+                "verifique se o bot pode enviar mensagens para este chat",
+            )
+        )
+    except Exception:
+        logger.exception("Falha no comando xend")
+        await message.answer(
+            _error_text(
+                "falha ao enviar mensagem",
+                "verifique chat_id e conteúdo da mensagem",
+            )
+        )
+
+
+@router.message(Command("ximg"))
+async def ximg(message: Message) -> None:
+    if not _is_owner_private_message(message):
+        return
+
+    lines = _lines(message)
+    if len(lines) < 2:
+        await message.answer(
+            "Use (respondendo uma imagem):\n"
+            "/ximg\n"
+            "<chat_id>"
+        )
+        return
+
+    if not message.reply_to_message or not message.reply_to_message.photo:
+        await message.answer(
+            _error_text(
+                "imagem não informada",
+                "responda a uma mensagem com foto e use /ximg na resposta",
+            )
+        )
+        return
+
+    try:
+        chat_id = _parse_chat_id(lines[1])
+
+        photo = message.reply_to_message.photo[-1]
+        file = await message.bot.get_file(photo.file_id)
+        file_bytes = await message.bot.download_file(file.file_path)
+
+        await message.bot.set_chat_photo(
+            chat_id=chat_id,
+            photo=file_bytes,
+        )
+        await message.answer(
+            _success_text(
+                "Foto atualizada.",
+                f"Grupo: {chat_id}",
+            )
+        )
+    except TelegramForbiddenError:
+        await message.answer(
+            _error_text(
+                "operação não permitida",
+                "verifique se o bot é administrador e pode alterar foto do chat",
+            )
+        )
+    except Exception:
+        logger.exception("Falha no comando ximg")
+        await message.answer(
+            _error_text(
+                "falha ao atualizar foto",
+                "verifique chat_id, permissões e a imagem informada",
+            )
+        )
+
 @router.message(Command("hidden"))
 async def hidden(message: Message) -> None:
     if not _is_owner_private_message(message):
@@ -1317,6 +1418,8 @@ async def hidden(message: Message) -> None:
         "/addgroup\n<chat_id>\n[nome] — registrar grupo\n\n"
         "/groups — listar grupos\n\n"
         "/rules\n<chat_id> — listar filtro /dxx\n\n"
+        "/xend\n<chat_id>\n<mensagem> — enviar mensagem\n\n"
+        "/ximg\n<chat_id> (responder imagem) — alterar foto\n\n"
         "Sistema:\n"
         "/hidden"
     )
