@@ -6,6 +6,7 @@ import unicodedata
 from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.exceptions import TelegramForbiddenError
 from aiogram.filters import Command
 from aiogram.types import (
@@ -502,12 +503,16 @@ async def handle_group_word_filter(message: Message) -> None:
 
     # não aplicar em administradores
     try:
-        member = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
-        if member.status in {"administrator", "creator"}:
-            return
+        member = await message.bot.get_chat_member(
+            message.chat.id,
+            message.from_user.id,
+        )
     except Exception:
         logger.exception("Falha ao verificar admin no grupo %s", chat_id)
-        return
+        raise SkipHandler()
+
+    if member.status in {"administrator", "creator"}:
+        raise SkipHandler()
 
     try:
         if action == "delete":
@@ -522,6 +527,11 @@ async def handle_group_word_filter(message: Message) -> None:
                 action,
             )
             return
+
+        raise SkipHandler()
+
+    except SkipHandler:
+        raise
 
     except TelegramForbiddenError:
         logger.exception("Sem permissão no grupo %s", chat_id)
