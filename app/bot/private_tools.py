@@ -245,7 +245,9 @@ def _get_rule(chat_id: int, rule_type: str) -> dict[str, object] | None:
         return None
 
     try:
-        return dict(json.loads(str(row["payload"])))
+        data = json.loads(row["payload"])
+        logger.warning("DXX LOAD | chat_id=%s | data=%s", chat_id, data)
+        return data
     except Exception:
         logger.exception("Falha ao decodificar payload de regra: chat_id=%s rule_type=%s", chat_id, rule_type)
         return None
@@ -482,6 +484,7 @@ class DxxWordFilter(BaseFilter):
 
         payload = _get_rule(message.chat.id, "words")
         if not payload:
+            logger.warning("DXX CHECK | chat_id=%s | payload=%s", message.chat.id, payload)
             return False
 
         words = payload.get("words", [])
@@ -657,6 +660,7 @@ async def dxx(message: Message) -> None:
             },
         )
 
+        logger.warning("DXX SAVE | chat_id=%s | words=%s | action=%s", chat_id, words, action)
         _remember_group(chat_id, str(chat_id))
 
         await message.answer(
