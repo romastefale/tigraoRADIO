@@ -489,7 +489,8 @@ class DxxWordFilter(BaseFilter):
             return False
 
         text_norm = _normalize_text(text_value)
-        return any(_normalize_text(str(word)) in text_norm for word in words)
+        normalized_words = [_normalize_text(str(word)) for word in words]
+        return any(word in text_norm for word in normalized_words)
 
 @router.message(F.chat.type.in_({"group", "supergroup"}), DxxWordFilter())
 async def handle_group_word_filter(message: Message) -> None:
@@ -605,6 +606,7 @@ async def groups(message: Message) -> None:
 @router.message(Command("dxx"))
 async def dxx(message: Message) -> None:
     if not _is_owner_private_message(message):
+        logger.error("DXX: sem permissão | chat=%s", getattr(message.chat, "id", None))
         return
 
     lines = _lines(message)
@@ -665,7 +667,11 @@ async def dxx(message: Message) -> None:
         )
 
     except Exception:
-        logger.exception("Falha no comando dxx")
+        logger.exception(
+            "DXX erro crítico | chat_id=%s | user_id=%s",
+            chat_id if "chat_id" in locals() else getattr(message.chat, "id", None),
+            getattr(message.from_user, "id", None),
+        )
         await message.answer(
             _error_text(
                 "erro ao configurar filtro",
