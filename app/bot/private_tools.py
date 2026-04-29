@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
-import unicodedata
+import re
 from datetime import datetime, timedelta, timezone
 
-from aiogram import F, Router
+from aiogram import Router
 from aiogram.exceptions import TelegramForbiddenError
-from aiogram.filters import BaseFilter, Command
+from aiogram.filters import Command
 from aiogram.types import (
     ChatJoinRequest,
     ChatMemberUpdated,
@@ -76,23 +76,6 @@ def _ensure_group_rules_table() -> None:
         )
 
 
-def _ensure_dxx_filters_table() -> None:
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS dxx_filters (
-                    chat_id INTEGER,
-                    word TEXT,
-                    action TEXT,
-                    updated_at DATETIME,
-                    PRIMARY KEY (chat_id, word)
-                );
-                """
-            )
-        )
-
-
 def _ensure_warns_table() -> None:
     with engine.begin() as conn:
         conn.execute(
@@ -113,7 +96,6 @@ def _ensure_all_tables() -> None:
     _ensure_join_requests_table()
     _ensure_known_groups_table()
     _ensure_group_rules_table()
-    _ensure_dxx_filters_table()
     _ensure_warns_table()
 
 
@@ -274,65 +256,6 @@ async def _notify_owner(bot, chat_id: int, text_message: str) -> None:
         logger.exception("Falha ao notificar owner: chat_id=%s", chat_id)
 
 
-def _normalize_words(raw: str) -> list[str]:
-    normalized = raw.replace(";", ",").replace("\n", ",")
-    words = [item.strip().lower() for item in normalized.split(",") if item.strip()]
-    return list(dict.fromkeys(words))
-
-
-def _save_dxx_filters(chat_id: int, action: str, words: list[str]) -> None:
-    _ensure_dxx_filters_table()
-
-    with engine.begin() as conn:
-        conn.execute(
-            text("DELETE FROM dxx_filters WHERE chat_id = :chat_id"),
-            {"chat_id": chat_id},
-        )
-        for word in words:
-            conn.execute(
-                text(
-                    """
-                    INSERT INTO dxx_filters (chat_id, word, action, updated_at)
-                    VALUES (:chat_id, :word, :action, :updated_at)
-                    """
-                ),
-                {
-                    "chat_id": chat_id,
-                    "word": word,
-                    "action": action,
-                    "updated_at": datetime.now(timezone.utc),
-                },
-            )
-
-
-def _get_dxx_filters(chat_id: int) -> tuple[str | None, list[str]]:
-    _ensure_dxx_filters_table()
-
-    with engine.begin() as conn:
-        rows = (
-            conn.execute(
-                text(
-                    """
-                    SELECT word, action
-                    FROM dxx_filters
-                    WHERE chat_id = :chat_id
-                    ORDER BY word ASC
-                    """
-                ),
-                {"chat_id": chat_id},
-            )
-            .mappings()
-            .all()
-        )
-
-    if not rows:
-        return None, []
-
-    words = [str(row["word"]).strip().lower() for row in rows if row.get("word")]
-    action = str(rows[0].get("action") or "").strip().lower() or None
-    return action, list(dict.fromkeys(words))
-
-
 def _add_warn(chat_id: int, user_id: int, reason: str) -> None:
     _ensure_warns_table()
 
@@ -421,22 +344,15 @@ def _format_known_groups() -> str:
     return "\n".join(output)
 
 
-def _format_words_rule(chat_id: int) -> str:
-    payload = _get_rule(chat_id, "words")
-    if not payload:
-        return "Nenhuma regra /dxx salva para este grupo."
+def _parse_message_link(link: str) -> tuple[int, int]:
+    match = re.search(r"/c/(\d+)/(\d+)", link)
+    if not match:
+        raise ValueError("link inválido")
 
-    words = payload.get("words", [])
-    action = str(payload.get("action") or "").strip().lower()
-    if not isinstance(words, list) or not words:
-        return "Nenhuma regra /dxx salva para este grupo."
+    chat_id = int("-100" + match.group(1))
+    message_id = int(match.group(2))
 
-    return (
-        "DXX FILTERS\n"
-        f"Grupo: {chat_id}\n"
-        f"Ação: {action or 'não definida'}\n"
-        f"Palavras: {', '.join(str(word) for word in words)}"
-    )
+    return chat_id, message_id
 
 
 @router.chat_join_request()
@@ -464,81 +380,6 @@ async def handle_join_request(event: ChatJoinRequest) -> None:
 async def handle_my_chat_member(event: ChatMemberUpdated) -> None:
     if event.chat.type in {"group", "supergroup"}:
         _remember_group(event.chat.id, event.chat.title or str(event.chat.id))
-
-
-def _normalize_text(text: str) -> str:
-    if not text:
-        return ""
-    text = text.lower()
-    text = unicodedata.normalize("NFD", text)
-    return "".join(c for c in text if unicodedata.category(c) != "Mn")
-
-
-
-
-class DxxWordFilter(BaseFilter):
-    async def __call__(self, message: Message) -> bool:
-        text_value = message.text or message.caption
-        if not text_value or not message.from_user:
-            return False
-
-        payload = _get_rule(message.chat.id, "words")
-        if not payload:
-            logger.warning("DXX CHECK | chat_id=%s | payload=%s", message.chat.id, payload)
-            return False
-
-        words = payload.get("words", [])
-        if not isinstance(words, list) or not words:
-            return False
-
-        text_norm = _normalize_text(text_value)
-        normalized_words = [_normalize_text(str(word)) for word in words]
-        return any(word in text_norm for word in normalized_words)
-
-@router.message(F.chat.type.in_({"group", "supergroup"}), DxxWordFilter())
-async def handle_group_word_filter(message: Message) -> None:
-    _remember_group(message.chat.id, message.chat.title or str(message.chat.id))
-
-    chat_id = message.chat.id
-    payload = _get_rule(chat_id, "words")
-    if not payload:
-        return
-
-    action = str(payload.get("action") or "").strip().lower()
-    if action not in {"delete", "vanish"}:
-        return
-
-    if not message.from_user:
-        return
-
-    try:
-        member = await message.bot.get_chat_member(chat_id, message.from_user.id)
-    except Exception:
-        logger.exception("Falha ao verificar admin no grupo %s", chat_id)
-        return
-
-    if member.status in {"administrator", "creator"}:
-        return
-
-    try:
-        if action == "delete":
-            await message.delete()
-            return
-
-        await _execute_action(
-            message.bot,
-            chat_id,
-            message.from_user.id,
-            "vanish",
-        )
-    except TelegramForbiddenError:
-        logger.exception("Sem permissão no grupo %s", chat_id)
-    except Exception:
-        logger.exception(
-            "Erro crítico no filtro de palavras | chat_id=%s | user_id=%s",
-            chat_id,
-            getattr(message.from_user, "id", None),
-        )
 
 
 @router.message(Command("addgroup"))
@@ -609,79 +450,57 @@ async def groups(message: Message) -> None:
 @router.message(Command("dxx"))
 async def dxx(message: Message) -> None:
     if not _is_owner_private_message(message):
-        logger.error("DXX: sem permissão | chat=%s", getattr(message.chat, "id", None))
         return
 
     lines = _lines(message)
 
-    if len(lines) < 4:
+    if len(lines) < 2:
         await message.answer(
-            "Título: Filtro rápido\n"
-            "Descrição: Define palavras proibidas com ação direta.\n\n"
             "Use:\n"
             "/dxx\n"
-            "<chat_id>\n"
-            "<delete|vanish>\n"
-            "<palavras separadas por vírgula ou linha>"
+            "<link_da_mensagem>\n"
+            "[delete|vanish opcional]"
         )
         return
 
     try:
-        chat_id = _parse_chat_id(lines[1])
-        action = lines[2].strip().lower()
+        link = lines[1]
+        action = lines[2].strip().lower() if len(lines) > 2 else "delete"
+        chat_id, message_id = _parse_message_link(link)
 
-        if action not in {"delete", "vanish"}:
+        if action == "delete":
+            await message.bot.delete_message(chat_id, message_id)
             await message.answer(
-                _error_text(
-                    "ação inválida",
-                    "use delete ou vanish",
-                )
+                f"Mensagem apagada.\nChat: {chat_id}\nMsg: {message_id}"
             )
             return
 
-        raw_words = "\n".join(lines[3:])
-        words = _normalize_words(raw_words)
-
-        if not words:
-            await message.answer(
-                _error_text(
-                    "nenhuma palavra válida",
-                    "informe ao menos uma palavra",
+        if action == "vanish":
+            try:
+                msg = await message.bot.forward_message(
+                    chat_id=message.chat.id,
+                    from_chat_id=chat_id,
+                    message_id=message_id,
                 )
+                user_id = msg.from_user.id if msg.from_user else None
+            except Exception:
+                user_id = None
+
+            if not user_id:
+                await message.answer("Não foi possível identificar o autor da mensagem.")
+                return
+
+            await message.bot.ban_chat_member(chat_id, user_id)
+            await message.answer(
+                f"Usuário removido.\nUser: {user_id}\nChat: {chat_id}"
             )
             return
 
-        _save_rule(
-            chat_id,
-            "words",
-            {
-                "words": words,
-                "action": action,
-            },
-        )
-
-        logger.warning("DXX SAVE | chat_id=%s | words=%s | action=%s", chat_id, words, action)
-        _remember_group(chat_id, str(chat_id))
-
-        await message.answer(
-            _success_text(
-                "Filtro configurado.",
-                f"Grupo: {chat_id}\nAção: {action}\nPalavras: {len(words)}",
-            )
-        )
+        await message.answer("Ação inválida. Use delete ou vanish.")
 
     except Exception:
-        logger.exception(
-            "DXX erro crítico | chat_id=%s | user_id=%s",
-            chat_id if "chat_id" in locals() else getattr(message.chat, "id", None),
-            getattr(message.from_user, "id", None),
-        )
-        await message.answer(
-            _error_text(
-                "erro ao configurar filtro",
-                "verifique os dados e tente novamente",
-            )
-        )
+        logger.exception("Erro no comando dxx por link")
+        await message.answer("Erro ao processar comando.")
 
 
 @router.message(Command("rules"))
@@ -709,7 +528,7 @@ async def rules(message: Message) -> None:
         )
         return
 
-    await message.answer(_format_words_rule(chat_id))
+    await message.answer("Nenhuma regra automática de /dxx ativa.")
 
 
 @router.message(Command("mx1"))
@@ -1476,7 +1295,7 @@ async def hidden(message: Message) -> None:
     await message.answer(
         "COMANDOS ATIVOS\n\n"
         "MODERAÇÃO:\n"
-        "/dxx\n<chat_id>\n<delete|vanish>\n<palavras> — filtro automático de palavras\n\n"
+        "/dxx\n<link> [delete|vanish] — moderação direta por link\n\n"
         "/vx\n<chat_id>\n<user_id> — vanish\n\n"
         "/uv\n<chat_id>\n<user_id> — unvanish\n\n"
         "/mx\n<chat_id>\n<user_id>\n[minutos] — mute\n\n"
