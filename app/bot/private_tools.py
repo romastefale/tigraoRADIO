@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import unicodedata
 from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
@@ -454,6 +455,14 @@ async def handle_my_chat_member(event: ChatMemberUpdated) -> None:
         _remember_group(event.chat.id, event.chat.title or str(event.chat.id))
 
 
+def _normalize_text(text: str) -> str:
+    if not text:
+        return ""
+    text = text.lower()
+    text = unicodedata.normalize("NFD", text)
+    return "".join(c for c in text if unicodedata.category(c) != "Mn")
+
+
 @router.message(F.chat.type.in_({"group", "supergroup"}))
 async def handle_group_word_filter(message: Message) -> None:
     _remember_group(message.chat.id, message.chat.title or str(message.chat.id))
@@ -462,32 +471,56 @@ async def handle_group_word_filter(message: Message) -> None:
     if not text_value:
         return
 
-    action, words = _get_dxx_filters(message.chat.id)
-    if not words or not action:
+    chat_id = message.chat.id
+    payload = _get_rule(chat_id, "words")
+    if not payload:
         return
 
-    text_lower = text_value.lower()
-    matched = any(word in text_lower for word in words)
+    words = payload.get("words", [])
+    action = str(payload.get("action") or "").strip().lower()
+
+    if not isinstance(words, list) or not words or not action:
+        return
+
+    text_norm = _normalize_text(text_value)
+
+    matched = False
+    for word in words:
+        if _normalize_text(str(word)) in text_norm:
+            matched = True
+            break
+
     if not matched:
         return
+
+    # não aplicar em administradores
+    if message.from_user:
+        try:
+            member = await message.bot.get_chat_member(message.chat.id, message.from_user.id)
+            if member.status in {"administrator", "creator"}:
+                return
+        except Exception:
+            return
 
     try:
         if action == "delete":
             await message.delete()
             return
 
-        if action == "vanish" and message.from_user:
-            await message.bot.ban_chat_member(
-                chat_id=message.chat.id,
-                user_id=message.from_user.id,
+        if action in {"vanish", "mute", "warn"} and message.from_user:
+            await _execute_action(
+                message.bot,
+                chat_id,
+                message.from_user.id,
+                action,
             )
             return
 
     except TelegramForbiddenError:
-        logger.exception("Sem permissão para executar filtro no grupo %s", message.chat.id)
+        logger.exception("Sem permissão no grupo %s", chat_id)
         return
     except Exception:
-        logger.exception("Falha ao executar filtro de palavras no grupo %s", message.chat.id)
+        logger.exception("Erro no filtro de palavras no grupo %s", chat_id)
         return
 
 
