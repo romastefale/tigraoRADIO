@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import RedirectResponse
@@ -110,21 +111,35 @@ async def spotify_track(
     return await spotify_service.get_current_or_last_played(user_id)
 
 
+async def _safe_process_update(update: Update) -> None:
+    if bot is None:
+        logger.error("PROCESS_UPDATE_ABORTED | bot não inicializado | update_id=%s", update.update_id)
+        return
+
+    try:
+        logger.info("PROCESS_UPDATE_START | update_id=%s", update.update_id)
+
+        await dispatcher.feed_update(bot, update)
+
+        logger.info("PROCESS_UPDATE_DONE | update_id=%s", update.update_id)
+
+    except Exception:
+        logger.exception("PROCESS_UPDATE_FAILED | update_id=%s", update.update_id)
+
+
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     try:
         data = await request.json()
 
-        update = Update.model_validate(data)
+        update = Update.model_validate(data, context={"bot": bot})
 
-        if bot is None:
-            logger.error("Bot não inicializado")
-            return {"ok": True}
+        logger.info("WEBHOOK_RECEIVED | update_id=%s", update.update_id)
 
-        await dispatcher.feed_update(bot, update)
+        asyncio.create_task(_safe_process_update(update))
 
         return {"ok": True}
 
     except Exception:
-        logger.exception("Erro no webhook")
+        logger.exception("WEBHOOK_PARSE_FAILED")
         return {"ok": True}
