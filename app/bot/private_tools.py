@@ -515,6 +515,16 @@ async def handle_group_word_filter(message: Message) -> None:
     except Exception:
         logger.exception("Falha ao verificar admin no grupo %s", chat_id)
         raise SkipHandler()
+        member = await message.bot.get_chat_member(
+            message.chat.id,
+            message.from_user.id,
+        )
+    except Exception:
+        logger.exception("Falha ao verificar admin no grupo %s", chat_id)
+        raise SkipHandler()
+
+    if member.status in {"administrator", "creator"}:
+        raise SkipHandler()
 
     try:
         if action == "delete":
@@ -531,6 +541,9 @@ async def handle_group_word_filter(message: Message) -> None:
             return
 
         raise SkipHandler()
+
+    except SkipHandler:
+        raise
 
     except TelegramForbiddenError:
         logger.exception("Sem permissão no grupo %s", chat_id)
