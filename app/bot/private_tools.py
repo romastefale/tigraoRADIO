@@ -458,21 +458,24 @@ async def dxx(message: Message) -> None:
         await message.answer(
             "Use:\n"
             "/dxx\n"
-            "<link_da_mensagem>"
+            "<link_da_mensagem>\n"
+            "[outros links opcionais]"
         )
         return
 
-    try:
-        link = lines[1]
-        chat_id, message_id = _parse_message_link(link)
-        await message.bot.delete_message(chat_id, message_id)
-        await message.answer(
-            f"Mensagem apagada.\nChat: {chat_id}\nMsg: {message_id}"
-        )
+    success = 0
+    failed = 0
 
-    except Exception:
-        logger.exception("DXX delete falhou")
-        await message.answer("Erro ao apagar mensagem.")
+    for link in lines[1:]:
+        try:
+            chat_id, message_id = _parse_message_link(link)
+            await message.bot.delete_message(chat_id, message_id)
+            success += 1
+        except Exception:
+            failed += 1
+            logger.exception("Falha ao apagar mensagem: %s", link)
+
+    await message.answer(f"Resultado:\nApagadas: {success}\nFalhas: {failed}")
 
 
 @router.message(Command("rules"))
