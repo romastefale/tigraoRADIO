@@ -301,9 +301,10 @@ async def _execute_action(
         return
 
     if action == "mute":
-        until = datetime.now(timezone.utc) + timedelta(
-            minutes=max(1, min(duration_minutes or 10, 120))
-        )
+        if duration_minutes is None or duration_minutes == 0:
+            until = None  # mute permanente
+        else:
+            until = datetime.now(timezone.utc) + timedelta(minutes=duration_minutes)
         await bot.restrict_chat_member(
             chat_id=chat_id,
             user_id=user_id,
