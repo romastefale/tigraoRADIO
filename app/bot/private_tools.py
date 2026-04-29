@@ -14,6 +14,7 @@ from aiogram.types import (
     ChatMemberUpdated,
     ChatPermissions,
     Message,
+    BufferedInputFile,
 )
 from sqlalchemy import text
 
@@ -1342,22 +1343,51 @@ async def xend(message: Message) -> None:
     try:
         chat_id = _parse_chat_id(lines[1])
         text_message = "\n".join(lines[2:]).strip()
+
+        # 🔹 Se respondeu alguma mensagem com mídia → copiar
+        if message.reply_to_message:
+            reply = message.reply_to_message
+
+            try:
+                await message.bot.copy_message(
+                    chat_id=chat_id,
+                    from_chat_id=message.chat.id,
+                    message_id=reply.message_id,
+                )
+
+                await message.answer(
+                    _success_text(
+                        "Mensagem enviada (cópia).",
+                        f"Destino: {chat_id}",
+                    )
+                )
+                return
+
+            except Exception:
+                logger.exception("Falha ao copiar mensagem no xend")
+
+        # 🔹 fallback texto
         if not text_message:
             await message.answer(
                 _error_text(
                     "mensagem vazia",
-                    "informe o conteúdo a ser enviado",
+                    "informe o conteúdo ou responda uma mensagem",
                 )
             )
             return
 
-        await message.bot.send_message(chat_id=chat_id, text=text_message)
+        await message.bot.send_message(
+            chat_id=chat_id,
+            text=text_message,
+        )
+
         await message.answer(
             _success_text(
                 "Mensagem enviada.",
                 f"Destino: {chat_id}",
             )
         )
+
     except TelegramForbiddenError:
         await message.answer(
             _error_text(
@@ -1365,6 +1395,7 @@ async def xend(message: Message) -> None:
                 "verifique se o bot pode enviar mensagens para este chat",
             )
         )
+
     except Exception:
         logger.exception("Falha no comando xend")
         await message.answer(
@@ -1417,7 +1448,7 @@ async def ximg(message: Message) -> None:
 
         await message.bot.set_chat_photo(
             chat_id=chat_id,
-            photo=photo_bytes,
+            photo=BufferedInputFile(photo_bytes, filename="chat_photo.jpg"),
         )
         await message.answer(
             _success_text(
