@@ -467,7 +467,7 @@ def _normalize_text(text: str) -> str:
 async def handle_group_word_filter(message: Message) -> None:
     _remember_group(message.chat.id, message.chat.title or str(message.chat.id))
 
-    text_value = message.text or message.caption or ""
+    text_value = message.text or message.caption
     if not text_value:
         return
 
@@ -500,6 +500,7 @@ async def handle_group_word_filter(message: Message) -> None:
             if member.status in {"administrator", "creator"}:
                 return
         except Exception:
+            logger.exception("Falha ao verificar admin no grupo %s", chat_id)
             return
 
     try:
@@ -1315,7 +1316,15 @@ async def xend(message: Message) -> None:
 
     try:
         chat_id = _parse_chat_id(lines[1])
-        text_message = "\n".join(lines[2:])
+        text_message = "\n".join(lines[2:]).strip()
+        if not text_message:
+            await message.answer(
+                _error_text(
+                    "mensagem vazia",
+                    "informe o conteúdo a ser enviado",
+                )
+            )
+            return
 
         await message.bot.send_message(chat_id=chat_id, text=text_message)
         await message.answer(
@@ -1369,11 +1378,21 @@ async def ximg(message: Message) -> None:
 
         photo = message.reply_to_message.photo[-1]
         file = await message.bot.get_file(photo.file_id)
-        file_bytes = await message.bot.download_file(file.file_path)
+        file_obj = await message.bot.download_file(file.file_path)
+        photo_bytes = file_obj.read() if hasattr(file_obj, "read") else file_obj
+
+        if hasattr(photo, "file_size") and photo.file_size and photo.file_size > 10_000_000:
+            await message.answer(
+                _error_text(
+                    "imagem muito grande",
+                    "use imagem menor que 10MB",
+                )
+            )
+            return
 
         await message.bot.set_chat_photo(
             chat_id=chat_id,
-            photo=file_bytes,
+            photo=photo_bytes,
         )
         await message.answer(
             _success_text(
