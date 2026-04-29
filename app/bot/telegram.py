@@ -150,17 +150,17 @@ def _play_caption(
 
 
 def _playing_keyboard(track_id: str, total_plays: int, total_likes: int, liked: bool) -> InlineKeyboardMarkup:
-    like_prefix = "❤️" if liked else "🔴"
+    heart = "♥" if liked else "♡"
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 _safe_button(
-                    text=f"🟢 ▶ {total_plays}",
+                    text=f"♫ {total_plays}",
                     callback=f"plays:{track_id}",
                     style="success"
                 ),
                 _safe_button(
-                    text=f"{like_prefix} ❤ {total_likes}",
+                    text=f"{heart} {total_likes}",
                     callback=f"like:{track_id}",
                     style="danger"
                 ),
@@ -980,10 +980,11 @@ def _register_handlers(dp: Dispatcher) -> None:
 
         owner_user_id = _extract_owner_user_id_from_message(callback.message)
         liked = await likes_service.toggle_track_like(user_id, owner_user_id, track_id)
+        is_liked = bool(liked)
         total_likes = await likes_service.get_total_likes(track_id, owner_user_id=owner_user_id)
         total_plays = await likes_service.get_track_play_count(track_id)
 
-        keyboard = _playing_keyboard(track_id, total_plays, total_likes, liked)
+        keyboard = _playing_keyboard(track_id, total_plays, total_likes, is_liked)
         try:
             await callback.message.edit_reply_markup(reply_markup=keyboard)
         except TelegramBadRequest:
