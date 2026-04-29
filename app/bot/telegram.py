@@ -64,6 +64,23 @@ MOOD_PHRASES_CUNTY = {
 }
 
 
+def _safe_button(text: str, callback: str, style: str | None = None):
+    try:
+        if style:
+            return InlineKeyboardButton(
+                text=text,
+                callback_data=callback,
+                style=style
+            )
+    except Exception:
+        pass
+
+    # fallback universal (clientes antigos)
+    return InlineKeyboardButton(
+        text=text,
+        callback_data=callback
+    )
+
 def _normalize_optional_text(value: object) -> str | None:
     if isinstance(value, str):
         cleaned = value.strip()
@@ -133,19 +150,24 @@ def _play_caption(
 
 
 def _playing_keyboard(track_id: str, total_plays: int, total_likes: int, liked: bool) -> InlineKeyboardMarkup:
-    heart = "♥" if liked else "♡"
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text=f"♫ {total_plays}",
-                callback_data=f"plays:{track_id}"
-            ),
-            InlineKeyboardButton(
-                text=f"{heart} {total_likes}",
-                callback_data=f"like:{track_id}"
-            )
+    like_prefix = "❤️" if liked else "🔴"
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                _safe_button(
+                    text=f"🟢 ▶ {total_plays}",
+                    callback=f"plays:{track_id}",
+                    style="success"
+                ),
+                _safe_button(
+                    text=f"{like_prefix} ❤ {total_likes}",
+                    callback=f"like:{track_id}",
+                    style="danger"
+                ),
+            ]
         ]
-    ])
+    )
+    return keyboard
 
 
 def _extract_owner_user_id_from_message(message: Message | None) -> int | None:
