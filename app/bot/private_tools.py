@@ -458,49 +458,21 @@ async def dxx(message: Message) -> None:
         await message.answer(
             "Use:\n"
             "/dxx\n"
-            "<link_da_mensagem>\n"
-            "[delete|vanish opcional]"
+            "<link_da_mensagem>"
         )
         return
 
     try:
         link = lines[1]
-        action = lines[2].strip().lower() if len(lines) > 2 else "delete"
         chat_id, message_id = _parse_message_link(link)
-
-        if action == "delete":
-            await message.bot.delete_message(chat_id, message_id)
-            await message.answer(
-                f"Mensagem apagada.\nChat: {chat_id}\nMsg: {message_id}"
-            )
-            return
-
-        if action == "vanish":
-            try:
-                msg = await message.bot.forward_message(
-                    chat_id=message.chat.id,
-                    from_chat_id=chat_id,
-                    message_id=message_id,
-                )
-                user_id = msg.from_user.id if msg.from_user else None
-            except Exception:
-                user_id = None
-
-            if not user_id:
-                await message.answer("Não foi possível identificar o autor da mensagem.")
-                return
-
-            await message.bot.ban_chat_member(chat_id, user_id)
-            await message.answer(
-                f"Usuário removido.\nUser: {user_id}\nChat: {chat_id}"
-            )
-            return
-
-        await message.answer("Ação inválida. Use delete ou vanish.")
+        await message.bot.delete_message(chat_id, message_id)
+        await message.answer(
+            f"Mensagem apagada.\nChat: {chat_id}\nMsg: {message_id}"
+        )
 
     except Exception:
-        logger.exception("Erro no comando dxx por link")
-        await message.answer("Erro ao processar comando.")
+        logger.exception("DXX delete falhou")
+        await message.answer("Erro ao apagar mensagem.")
 
 
 @router.message(Command("rules"))
@@ -1293,23 +1265,21 @@ async def hidden(message: Message) -> None:
         return
 
     await message.answer(
-        "COMANDOS ATIVOS\n\n"
+        "COMANDOS ADMINISTRATIVOS\n\n"
         "MODERAÇÃO:\n"
-        "/dxx\n<link> [delete|vanish] — moderação direta por link\n\n"
-        "/vx\n<chat_id>\n<user_id> — vanish\n\n"
-        "/uv\n<chat_id>\n<user_id> — unvanish\n\n"
-        "/mx\n<chat_id>\n<user_id>\n[minutos] — mute\n\n"
-        "/ovbx\n<chat_id>\n<user_id>\n<vanish|unvanish|mute>\n[minutos] — ação direta\n\n"
+        "/dxx\n<link> — apaga mensagem diretamente via link\n\n"
+        "AÇÕES DIRETAS:\n"
+        "/vx\n<chat_id>\n<user_id> — remover usuário (ban)\n\n"
+        "/uv\n<chat_id>\n<user_id> — desbanir usuário\n\n"
+        "/mx\n<chat_id>\n<user_id>\n[minutos] — silenciar usuário\n\n"
+        "/ovbx\n<chat_id>\n<user_id>\n<vanish|unvanish|mute>\n[minutos] — ação manual completa\n\n"
         "ACESSO:\n"
-        "/mx1\n<chat_id> — link direto\n\n"
-        "/mx2\n<chat_id> — link com aprovação\n\n"
-        "/joinx\n<chat_id>\n<user_id> — aprovar solicitação\n\n"
+        "/mx1\n<chat_id> — gerar link direto\n\n"
+        "/mx2\n<chat_id> — gerar link com aprovação\n\n"
+        "/joinx\n<chat_id>\n<user_id> — aprovar entrada manual\n\n"
         "GRUPOS:\n"
         "/addgroup\n<chat_id>\n[nome] — registrar grupo\n\n"
         "/groups — listar grupos\n\n"
-        "/rules\n<chat_id> — listar filtro /dxx\n\n"
-        "/xend\n<chat_id>\n<mensagem> — enviar mensagem\n\n"
-        "/ximg\n<chat_id> (responder imagem) — alterar foto\n\n"
-        "Sistema:\n"
-        "/hidden"
+        "SISTEMA:\n"
+        "/hidden — exibir comandos\n"
     )
