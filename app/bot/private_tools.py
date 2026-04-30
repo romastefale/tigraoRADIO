@@ -486,29 +486,28 @@ def _ddx_match(text_value: str, words: list[str]) -> bool:
     return False
 
 
-_ddx_user_state: dict[int, dict[str, object]] = {}
-_DDX_STATE_TTL = 300
+_user_state: dict[int, dict[str, object]] = {}
+_STATE_TTL = 300
 
 
 def _set_state(user_id: int, data: dict[str, object]) -> None:
     data["ts"] = int(datetime.now(timezone.utc).timestamp())
-    _ddx_user_state[user_id] = data
+    _user_state[user_id] = data
 
 
 def _get_state(user_id: int) -> dict[str, object] | None:
-    data = _ddx_user_state.get(user_id)
-    if not data:
+    state = _user_state.get(user_id)
+    if not state:
         return None
-    ts = int(data.get("ts", 0))
     now = int(datetime.now(timezone.utc).timestamp())
-    if now - ts > _DDX_STATE_TTL:
-        _ddx_user_state.pop(user_id, None)
+    if now - int(state.get("ts", 0)) > _STATE_TTL:
+        _user_state.pop(user_id, None)
         return None
-    return data
+    return state
 
 
 def _clear_state(user_id: int) -> None:
-    _ddx_user_state.pop(user_id, None)
+    _user_state.pop(user_id, None)
 
 
 
@@ -678,643 +677,97 @@ async def ddx(message: Message) -> None:
         await message.answer("Erro ao processar /ddx.")
 
 
-@router.message(Command("dxmenu"))
-async def dxmenu(message: Message):
+@router.message(Command("painel"))
+async def painel(message: Message):
     if not _is_owner_private_message(message):
         return
 
-    chats = _list_known_chats(limit=10)
-    if not chats:
-        await message.answer("Nenhum grupo conhecido ainda. Interaja no grupo primeiro.")
-        return
-
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=title[:30], callback_data=f"ddx:select:{chat_id}")]
-            for chat_id, title in chats
+            [InlineKeyboardButton(text="🧹 Filtros", callback_data="panel:ddx")],
+            [InlineKeyboardButton(text="⚡ Ações", callback_data="panel:dx")],
+            [InlineKeyboardButton(text="⏱ Tempo", callback_data="panel:mx")],
+            [InlineKeyboardButton(text="🧨 Limpeza", callback_data="panel:clx")],
         ]
     )
-    await message.answer("Escolha o grupo:", reply_markup=keyboard)
+
+    await message.answer("Painel de Moderação", reply_markup=keyboard)
 
 
-@router.callback_query(F.data.startswith("ddx:select:"))
-async def ddx_select_group(call: CallbackQuery):
+@router.callback_query(F.data.startswith("panel:"))
+async def painel_flow(call: CallbackQuery):
     if call.from_user.id != OWNER_ID:
         return
 
-    chat_id = int(call.data.split(":")[2])
-    _set_state(call.from_user.id, {"chat_id": chat_id})
+    flow = call.data.split(":", 1)[1]
 
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Adicionar", callback_data="ddx:act:add")],
-            [InlineKeyboardButton(text="➖ Remover", callback_data="ddx:act:remove")],
-            [InlineKeyboardButton(text="📋 Listar", callback_data="ddx:act:list")],
-            [InlineKeyboardButton(text="🧪 Testar", callback_data="ddx:act:test")],
-            [InlineKeyboardButton(text="⛔ Desligar", callback_data="ddx:act:off")],
-        ]
-    )
+    if flow == "ddx":
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="➕ add", callback_data="panel:ddx:add")],
+                [InlineKeyboardButton(text="➖ remove", callback_data="panel:ddx:remove")],
+                [InlineKeyboardButton(text="📋 list", callback_data="panel:ddx:list")],
+                [InlineKeyboardButton(text="🧪 test", callback_data="panel:ddx:test")],
+                [InlineKeyboardButton(text="⛔ off", callback_data="panel:ddx:off")],
+            ]
+        )
+        await call.message.answer("Filtros DDX: escolha uma ação", reply_markup=keyboard)
 
-    await call.message.answer("Escolha a ação:", reply_markup=keyboard)
+    elif flow == "dx":
+        _set_state(call.from_user.id, {"flow": "dx", "action": "delete_link", "step": "input"})
+        await call.message.answer("Envie os links (1 por linha) para apagar mensagens.")
+
+    elif flow == "mx":
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🔇 mute", callback_data="panel:mx:mute")],
+                [InlineKeyboardButton(text="🔓 unmute", callback_data="panel:mx:unmute")],
+            ]
+        )
+        await call.message.answer("Tempo MX: escolha uma ação", reply_markup=keyboard)
+
+    elif flow == "clx":
+        _set_state(call.from_user.id, {"flow": "clx", "action": "clean_messages", "step": "input"})
+        await call.message.answer("Quantas mensagens limpar? (padrão 50, máximo 100)")
+
     await call.answer()
 
 
-@router.callback_query(F.data.startswith("ddx:act:"))
-async def ddx_select_action(call: CallbackQuery):
+@router.callback_query(F.data.startswith("panel:ddx:"))
+async def painel_ddx_action(call: CallbackQuery):
     if call.from_user.id != OWNER_ID:
         return
 
     action = call.data.split(":")[2]
-    state = _get_state(call.from_user.id)
-    if not state:
-        await call.message.answer("Sessão expirada. Use /dxmenu novamente.")
-        await call.answer()
-        return
-
-    state["action"] = action
-    _set_state(call.from_user.id, state)
-
-    if action in {"add", "remove"}:
-        await call.message.answer("Envie apenas as palavras (ex: pipizinho, spam)")
-    elif action == "list":
-        await call.message.answer("Listando…")
-    elif action == "test":
-        await call.message.answer("Envie o texto para teste")
-    elif action == "off":
-        await call.message.answer("Confirmando desligamento…")
-
+    _set_state(call.from_user.id, {"flow": "ddx", "action": action, "step": "input"})
+    await call.message.answer(
+        "DDX: envie no formato\n<chat_id>\n<palavras/texto>\n"
+        "(para list/off basta enviar apenas o chat_id)"
+    )
     await call.answer()
 
 
-@router.message()
-async def ddx_menu_input_handler(message: Message):
-    if message.from_user.id != OWNER_ID:
+@router.callback_query(F.data.startswith("panel:mx:"))
+async def painel_mx_action(call: CallbackQuery):
+    if call.from_user.id != OWNER_ID:
         return
 
-    state = _get_state(message.from_user.id)
-    if not state:
-        return
-
-    chat_id = int(state.get("chat_id"))
-    action = str(state.get("action", ""))
-
-    current = _ddx_get(chat_id) or {"words": [], "enabled": True}
-    current_words = current.get("words", []) if isinstance(current.get("words"), list) else []
-
-    if action == "add":
-        words = _ddx_parse_words(message.text or "")
-        if not words:
-            await message.answer("Nenhuma palavra válida.")
-            return
-        final_words = list(dict.fromkeys([str(w) for w in current_words] + words))
-        _ddx_save(chat_id, final_words, True)
-        await message.answer(f"Adicionado. Total: {len(final_words)}")
-        _clear_state(message.from_user.id)
-
-    elif action == "remove":
-        words = set(_ddx_parse_words(message.text or ""))
-        final_words = [str(w) for w in current_words if str(w) not in words]
-        _ddx_save(chat_id, final_words, True)
-        await message.answer(f"Atualizado. Total: {len(final_words)}")
-        _clear_state(message.from_user.id)
-
-    elif action == "list":
-        await message.answer(
-            f"Palavras:\n{', '.join(current_words) if current_words else 'nenhuma'}"
-        )
-        _clear_state(message.from_user.id)
-
-    elif action == "test":
-        matched = _ddx_match(message.text or "", [str(w) for w in current_words])
-        await message.answer("detectado" if matched else "não detectado")
-        _clear_state(message.from_user.id)
-
-    elif action == "off":
-        _ddx_save(chat_id, current_words, False)
-        await message.answer("DDX desligado")
-        _clear_state(message.from_user.id)
+    action = call.data.split(":")[2]
+    _set_state(call.from_user.id, {"flow": "mx", "action": action, "step": "input"})
+    if action == "mute":
+        await call.message.answer("MX mute: envie\n<chat_id>\n<user_id>\n<tempo (10m,2h,3d,i) opcional>")
+    else:
+        await call.message.answer("MX unmute: envie\n<chat_id>\n<user_id>")
+    await call.answer()
 
 
-@router.message(Command("rules"))
-async def rules(message: Message) -> None:
+@router.message(Command("dx"))
+async def dx(message: Message) -> None:
     if not _is_owner_private_message(message):
         return
 
-    lines = _lines(message)
-    if len(lines) < 2:
-        await message.answer(
-            "Use:\n"
-            "/rules\n"
-            "<chat_id>"
-        )
-        return
-
-    try:
-        chat_id = _parse_chat_id(lines[1])
-    except Exception:
-        await message.answer(
-            _error_text(
-                "chat_id inválido",
-                "envie um número válido, exemplo: -1001234567890",
-            )
-        )
-        return
-
-    await message.answer("Nenhuma regra automática de /dxx ativa.")
-
-
-@router.message(Command("mx1"))
-async def mx1(message: Message) -> None:
-    if not _is_owner_private_message(message):
-        return
-
-    lines = _lines(message)
-    if len(lines) < 2:
-        await message.answer(
-            "Título: Link direto\n"
-            "Descrição: Gera link de entrada imediata, uso único e expiração curta.\n\n"
-            "Use:\n"
-            "/mx1\n"
-            "<chat_id>"
-        )
-        return
-
-    try:
-        chat_id = _parse_chat_id(lines[1])
-        invite = await message.bot.create_chat_invite_link(
-            chat_id=chat_id,
-            creates_join_request=False,
-            member_limit=1,
-            expire_date=datetime.now(timezone.utc) + SINGLE_USE_EXPIRY,
-        )
-        await message.answer(
-            _success_text(
-                "Link de entrada direta gerado.",
-                f"Grupo: {chat_id}\nLink:\n{invite.invite_link}",
-            )
-        )
-    except TelegramForbiddenError:
-        await message.answer(
-            _error_text(
-                "operação não permitida",
-                "verifique se o bot é administrador do grupo e pode gerar links",
-            )
-        )
-    except Exception:
-        logger.exception("Falha ao criar link direto")
-        await message.answer(
-            _error_text(
-                "falha ao criar link",
-                "verifique o chat_id, permissões do bot e tente novamente",
-            )
-        )
-
-
-@router.message(Command("mx2"))
-async def mx2(message: Message) -> None:
-    if not _is_owner_private_message(message):
-        return
-
-    lines = _lines(message)
-    if len(lines) < 2:
-        await message.answer(
-            "Título: Link com aprovação\n"
-            "Descrição: Gera link onde a entrada depende de aprovação.\n\n"
-            "Use:\n"
-            "/mx2\n"
-            "<chat_id>"
-        )
-        return
-
-    try:
-        chat_id = _parse_chat_id(lines[1])
-        invite = await message.bot.create_chat_invite_link(
-            chat_id=chat_id,
-            creates_join_request=True,
-        )
-        await message.answer(
-            _success_text(
-                "Link de solicitação de entrada gerado.",
-                f"Grupo: {chat_id}\nLink:\n{invite.invite_link}",
-            )
-        )
-    except TelegramForbiddenError:
-        await message.answer(
-            _error_text(
-                "operação não permitida",
-                "verifique se o bot é administrador do grupo e pode gerar links",
-            )
-        )
-    except Exception:
-        logger.exception("Falha ao criar link com aprovação")
-        await message.answer(
-            _error_text(
-                "falha ao criar link",
-                "verifique o chat_id, permissões do bot e tente novamente",
-            )
-        )
-
-
-@router.message(Command("joinx"))
-async def joinx(message: Message) -> None:
-    if not _is_owner_private_message(message):
-        return
-
-    _ensure_join_requests_table()
-
-    lines = _lines(message)
-    if len(lines) < 3:
-        await message.answer(
-            "Título: Aprovação manual\n"
-            "Descrição: Aprova usuário que solicitou entrada recentemente.\n\n"
-            "Use:\n"
-            "/joinx\n"
-            "<chat_id>\n"
-            "<user_id>"
-        )
-        return
-
-    try:
-        chat_id = _parse_chat_id(lines[1])
-        user_id = _parse_user_id(lines[2])
-    except Exception:
-        await message.answer(
-            _error_text(
-                "chat_id ou user_id inválido",
-                "envie apenas números nas linhas 2 e 3",
-            )
-        )
-        return
-
-    cutoff = datetime.now(timezone.utc) - APPROVAL_WINDOW
-
-    with engine.begin() as conn:
-        conn.execute(
-            text("DELETE FROM join_requests WHERE created_at < :cutoff"),
-            {"cutoff": cutoff},
-        )
-
-        row = (
-            conn.execute(
-                text(
-                    """
-                    SELECT user_id, chat_id, created_at
-                    FROM join_requests
-                    WHERE user_id = :user_id AND chat_id = :chat_id
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                    """
-                ),
-                {
-                    "user_id": user_id,
-                    "chat_id": chat_id,
-                },
-            )
-            .mappings()
-            .first()
-        )
-
-    if not row:
-        await message.answer(
-            _error_text(
-                "solicitação não encontrada",
-                "confirme se o usuário solicitou entrada nos últimos 120 minutos",
-            )
-        )
-        return
-
-    created_at = _parse_created_at(row["created_at"])
-    if created_at is None or created_at < cutoff:
-        await message.answer(
-            _error_text(
-                "solicitação expirada",
-                "peça para o usuário solicitar entrada novamente",
-            )
-        )
-        return
-
-    try:
-        await message.bot.approve_chat_join_request(
-            chat_id=chat_id,
-            user_id=user_id,
-        )
-    except TelegramForbiddenError:
-        await message.answer(
-            _error_text(
-                "operação não permitida",
-                "verifique se o bot é administrador do grupo e pode aprovar solicitações",
-            )
-        )
-        return
-    except Exception:
-        logger.exception("Falha na aprovação manual")
-        await message.answer(
-            _error_text(
-                "falha na aprovação",
-                "verifique os dados e tente novamente",
-            )
-        )
-        return
-
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                """
-                DELETE FROM join_requests
-                WHERE user_id = :user_id AND chat_id = :chat_id
-                """
-            ),
-            {
-                "user_id": user_id,
-                "chat_id": chat_id,
-            },
-        )
-
-    await message.answer(
-        _success_text(
-            "Usuário aprovado.",
-            f"Grupo: {chat_id}\nUsuário: {user_id}",
-        )
-    )
-
-
-@router.message(Command("vx"))
-async def vx(message: Message) -> None:
-    if not _is_owner_private_message(message):
-        return
-
-    lines = _lines(message)
-    if len(lines) < 3:
-        await message.answer(
-            "Título: Vanish\n"
-            "Descrição: Remove usuário imediatamente do grupo.\n\n"
-            "Use:\n"
-            "/vx\n"
-            "<chat_id>\n"
-            "<user_id>"
-        )
-        return
-
-    try:
-        chat_id = _parse_chat_id(lines[1])
-        user_id = _parse_user_id(lines[2])
-        await _execute_action(message.bot, chat_id, user_id, "vanish")
-        await _notify_owner(message.bot, chat_id, f"Vanish executado | user_id={user_id}")
-        await message.answer(
-            _success_text(
-                "Vanish executado.",
-                f"Grupo: {chat_id}\nUsuário: {user_id}",
-            )
-        )
-    except TelegramForbiddenError:
-        await message.answer(
-            _error_text(
-                "operação não permitida",
-                "verifique se o bot é administrador do grupo e pode banir usuários",
-            )
-        )
-    except Exception:
-        logger.exception("Falha no vanish")
-        await message.answer(
-            _error_text(
-                "falha na execução",
-                "verifique chat_id, user_id e permissões do bot",
-            )
-        )
-
-
-@router.message(Command("uv"))
-async def uv(message: Message) -> None:
-    if not _is_owner_private_message(message):
-        return
-
-    lines = _lines(message)
-    if len(lines) < 3:
-        await message.answer(
-            "Título: Unvanish\n"
-            "Descrição: Restaura acesso de usuário removido.\n\n"
-            "Use:\n"
-            "/uv\n"
-            "<chat_id>\n"
-            "<user_id>"
-        )
-        return
-
-    try:
-        chat_id = _parse_chat_id(lines[1])
-        user_id = _parse_user_id(lines[2])
-        await _execute_action(message.bot, chat_id, user_id, "unvanish")
-        await _notify_owner(message.bot, chat_id, f"Unvanish executado | user_id={user_id}")
-        await message.answer(
-            _success_text(
-                "Unvanish executado.",
-                f"Grupo: {chat_id}\nUsuário: {user_id}",
-            )
-        )
-    except TelegramForbiddenError:
-        await message.answer(
-            _error_text(
-                "operação não permitida",
-                "verifique se o bot é administrador do grupo e pode desbanir usuários",
-            )
-        )
-    except Exception:
-        logger.exception("Falha no unvanish")
-        await message.answer(
-            _error_text(
-                "falha na execução",
-                "verifique chat_id, user_id e permissões do bot",
-            )
-        )
-
-
-@router.message(Command("mx"))
-async def mx(message: Message) -> None:
-    if not _is_owner_private_message(message):
-        return
-
-    lines = _lines(message)
-    if len(lines) < 3:
-        await message.answer(
-            "Título: Mute temporário\n"
-            "Descrição: Silencia usuário por tempo definido. Se não informar tempo, usa 10 minutos.\n\n"
-            "Use:\n"
-            "/mx\n"
-            "<chat_id>\n"
-            "<user_id>\n"
-            "<minutos opcional até 120>"
-        )
-        return
-
-    try:
-        chat_id = _parse_chat_id(lines[1])
-        user_id = _parse_user_id(lines[2])
-        duration_raw = lines[3] if len(lines) > 3 else "10m"
-
-        try:
-            parsed = _parse_duration(duration_raw)
-        except Exception:
-            await message.answer("Duração inválida. Use: 10m, 2h, 3d, i ou x")
-            return
-
-        if parsed == "unmute":
-            await message.bot.restrict_chat_member(
-                chat_id=chat_id,
-                user_id=user_id,
-                permissions=ChatPermissions(
-                    can_send_messages=True,
-                    can_send_media_messages=True,
-                    can_send_other_messages=True,
-                    can_add_web_page_previews=True,
-                ),
-            )
-
-            await message.answer(f"Usuário desmutado.\nUser: {user_id}")
-            return
-
-        if parsed == "indefinido":
-            until = None
-        else:
-            until = datetime.now(timezone.utc) + parsed
-
-        await message.bot.restrict_chat_member(
-            chat_id=chat_id,
-            user_id=user_id,
-            permissions=ChatPermissions(can_send_messages=False),
-            until_date=until,
-        )
-
-        await message.answer(
-            f"Usuário silenciado.\nUser: {user_id}\nTempo: {duration_raw}"
-        )
-    except TelegramForbiddenError:
-        await message.answer(
-            _error_text(
-                "operação não permitida",
-                "verifique se o bot é administrador do grupo e pode restringir usuários",
-            )
-        )
-    except Exception:
-        logger.exception("Falha ao aplicar mute")
-        await message.answer(
-            _error_text(
-                "falha ao aplicar mute",
-                "verifique chat_id, user_id, tempo e permissões do bot",
-            )
-        )
-
-
-@router.message(Command("lgx"))
-async def lgx(message: Message) -> None:
-    if not _is_owner_private_message(message):
-        return
-
-    lines = _lines(message)
-    if len(lines) < 3:
-        await message.answer(
-            "Título: Notificações privadas\n"
-            "Descrição: Ativa ou desativa alertas privados para ações internas.\n\n"
-            "Use:\n"
-            "/lgx\n"
-            "<chat_id>\n"
-            "<on|off>"
-        )
-        return
-
-    try:
-        chat_id = _parse_chat_id(lines[1])
-        value = lines[2].strip().lower()
-
-        if value not in {"on", "off", "true", "false", "1", "0", "sim", "nao", "não"}:
-            await message.answer(
-                _error_text(
-                    "valor inválido",
-                    "use on ou off",
-                )
-            )
-            return
-
-        enabled = value in {"on", "true", "1", "sim"}
-        _save_rule(chat_id, "notify", {"enabled": enabled})
-
-        await message.answer(
-            _success_text(
-                "Notificações atualizadas.",
-                f"Grupo: {chat_id}\nStatus: {'ativas' if enabled else 'inativas'}",
-            )
-        )
-    except Exception:
-        logger.exception("Falha ao salvar notificação lgx")
-        await message.answer(
-            _error_text(
-                "falha ao salvar notificação",
-                "verifique chat_id e valor on/off",
-            )
-        )
-
-
-@router.message(Command("fdx"))
-async def fdx(message: Message) -> None:
-    if not _is_owner_private_message(message):
-        return
-
-    lines = _lines(message)
-    if len(lines) < 3:
-        await message.answer(
-            "Título: Busca\n"
-            "Descrição: Busca registros internos de advertência.\n\n"
-            "Use:\n"
-            "/fdx\n"
-            "<chat_id>\n"
-            "<termo>"
-        )
-        return
-
-    try:
-        chat_id = _parse_chat_id(lines[1])
-        term = f"%{lines[2].strip().lower()}%"
-
-        _ensure_warns_table()
-
-        with engine.begin() as conn:
-            rows = (
-                conn.execute(
-                    text(
-                        """
-                        SELECT user_id, reason, created_at
-                        FROM warns
-                        WHERE chat_id = :chat_id AND lower(reason) LIKE :term
-                        ORDER BY created_at DESC
-                        LIMIT 20
-                        """
-                    ),
-                    {
-                        "chat_id": chat_id,
-                        "term": term,
-                    },
-                )
-                .mappings()
-                .all()
-            )
-
-        if not rows:
-            await message.answer("Nenhum resultado.")
-            return
-
-        await message.answer(
-            "\n".join(
-                f"{row['user_id']} | {row['reason']} | {row['created_at']}"
-                for row in rows
-            )
-        )
-    except Exception:
-        logger.exception("Falha na busca fdx")
-        await message.answer(
-            _error_text(
-                "falha na busca",
-                "verifique chat_id e termo informado",
-            )
-        )
+    _set_state(message.from_user.id, {"flow": "dx", "action": "delete_link", "step": "input"})
+    await message.answer("Envie os links (1 por linha) para apagar mensagens.")
 
 
 @router.message(Command("clx"))
@@ -1322,72 +775,126 @@ async def clx(message: Message) -> None:
     if not _is_owner_private_message(message):
         return
 
-    lines = _lines(message)
-    if len(lines) < 3:
-        await message.answer(
-            "Título: Limpeza\n"
-            "Descrição: Executa limpeza segura de registros internos.\n\n"
-            "Use:\n"
-            "/clx\n"
-            "<chat_id>\n"
-            "<warns|rules|old_requests>"
-        )
+    _set_state(message.from_user.id, {"flow": "clx", "action": "clean_messages", "step": "input"})
+    await message.answer("Quantas mensagens limpar? (padrão 50, máximo 100)")
+
+
+@router.message()
+async def painel_input(message: Message):
+    if not message.from_user or message.from_user.id != OWNER_ID:
         return
 
-    try:
-        chat_id = _parse_chat_id(lines[1])
-        target = lines[2].strip().lower()
+    state = _get_state(message.from_user.id)
+    if not state:
+        return
 
-        if target not in {"warns", "rules", "old_requests"}:
-            await message.answer(
-                _error_text(
-                    "tipo inválido",
-                    "use warns, rules ou old_requests",
-                )
-            )
+    flow = state.get("flow")
+    action = state.get("action")
+
+    if flow == "ddx":
+        lines = _lines(message)
+        if not lines:
+            await message.answer("Entrada vazia.")
+            _clear_state(message.from_user.id)
             return
 
-        if target == "warns":
-            _ensure_warns_table()
-            with engine.begin() as conn:
-                conn.execute(
-                    text("DELETE FROM warns WHERE chat_id = :chat_id"),
-                    {"chat_id": chat_id},
+        try:
+            chat_id = _parse_chat_id(lines[0])
+            current = _ddx_get(chat_id) or {"words": [], "enabled": True}
+            current_words = current.get("words", []) if isinstance(current.get("words"), list) else []
+
+            if action == "list":
+                await message.answer(
+                    f"DDX\nGrupo: {chat_id}\nStatus: {'ativo' if current.get('enabled') else 'inativo'}\n"
+                    f"Palavras: {', '.join(str(word) for word in current_words) if current_words else 'nenhuma'}"
                 )
+            elif action == "off":
+                _ddx_save(chat_id, [str(w) for w in current_words], enabled=False)
+                await message.answer(f"DDX desligado.\nGrupo: {chat_id}")
+            elif action == "add":
+                incoming = _ddx_parse_words("\n".join(lines[1:]))
+                final_words = list(dict.fromkeys([str(w) for w in current_words] + incoming))
+                _ddx_save(chat_id, final_words, enabled=True)
+                await message.answer(f"DDX atualizado. Total de palavras: {len(final_words)}")
+            elif action == "remove":
+                remove_words = set(_ddx_parse_words("\n".join(lines[1:])))
+                final_words = [str(w) for w in current_words if str(w) not in remove_words]
+                _ddx_save(chat_id, final_words, enabled=True)
+                await message.answer(f"DDX atualizado. Total de palavras: {len(final_words)}")
+            elif action == "test":
+                matched = _ddx_match("\n".join(lines[1:]), [str(w) for w in current_words])
+                await message.answer("detectado" if matched else "não detectado")
+        except Exception:
+            logger.exception("PAINEL_DDX_FAILED")
+            await message.answer("Erro ao processar DDX.")
 
-        if target == "rules":
-            _ensure_group_rules_table()
-            with engine.begin() as conn:
-                conn.execute(
-                    text("DELETE FROM group_rules WHERE chat_id = :chat_id"),
-                    {"chat_id": chat_id},
+    elif flow == "dx":
+        links = (message.text or "").splitlines()
+        success = 0
+        for link in links:
+            try:
+                chat_id, msg_id = _parse_message_link(link)
+                await message.bot.delete_message(chat_id, msg_id)
+                success += 1
+            except Exception:
+                pass
+        await message.answer(f"Apagadas: {success}")
+
+    elif flow == "mx":
+        lines = _lines(message)
+        try:
+            chat_id = _parse_chat_id(lines[0])
+            user_id = _parse_user_id(lines[1])
+            if action == "unmute":
+                await message.bot.restrict_chat_member(
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    permissions=ChatPermissions(
+                        can_send_messages=True,
+                        can_send_media_messages=True,
+                        can_send_other_messages=True,
+                        can_add_web_page_previews=True,
+                    ),
                 )
-
-        if target == "old_requests":
-            _ensure_join_requests_table()
-            cutoff = datetime.now(timezone.utc) - APPROVAL_WINDOW
-            with engine.begin() as conn:
-                conn.execute(
-                    text("DELETE FROM join_requests WHERE created_at < :cutoff"),
-                    {"cutoff": cutoff},
+                await message.answer(f"Usuário desmutado.\nUser: {user_id}")
+            else:
+                duration_raw = lines[2] if len(lines) > 2 else "10m"
+                parsed = _parse_duration(duration_raw)
+                until = None if parsed == "indefinido" else datetime.now(timezone.utc) + parsed
+                await message.bot.restrict_chat_member(
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    permissions=ChatPermissions(can_send_messages=False),
+                    until_date=until,
                 )
+                await message.answer(f"Usuário silenciado.\nUser: {user_id}\nTempo: {duration_raw}")
+        except Exception:
+            logger.exception("PAINEL_MX_FAILED")
+            await message.answer("Erro ao processar MX.")
 
-        await message.answer(
-            _success_text(
-                "Limpeza executada.",
-                f"Grupo: {chat_id}\nTipo: {target}",
-            )
-        )
-    except Exception:
-        logger.exception("Falha na limpeza clx")
-        await message.answer(
-            _error_text(
-                "falha na limpeza",
-                "verifique chat_id e tipo informado",
-            )
-        )
+    elif flow == "clx":
+        try:
+            amount = int((message.text or "").strip())
+        except Exception:
+            amount = 50
 
+        if amount <= 0:
+            amount = 50
+        if amount > 100:
+            amount = 100
 
+        deleted = 0
+        current_id = message.message_id
+        for i in range(amount):
+            try:
+                await message.bot.delete_message(message.chat.id, current_id - i)
+                deleted += 1
+            except Exception:
+                pass
+
+        await message.answer(f"Mensagens apagadas: {deleted}")
+
+    _clear_state(message.from_user.id)
 
 
 @router.message(Command("xend"))
@@ -1544,6 +1051,8 @@ async def hidden(message: Message) -> None:
 
     await message.answer(
         "COMANDOS ADMINISTRATIVOS\n\n"
+        "PAINEL:\n"
+        "/painel — centraliza moderação\n\n"
         "MODERAÇÃO:\n"
         "/dx\n<link_da_mensagem>\n[outros links opcionais] — apaga mensagens diretamente por link\n\n"
         "/ddx\n<chat_id>\n<add|remove|list|off|test>\n<palavras ou texto> — filtro automático silencioso por palavras\n\n"

@@ -140,8 +140,8 @@ async def telegram_webhook(request: Request):
 
         logger.warning("WEBHOOK_RECEIVED | update_id=%s", update.update_id)
 
-        message = getattr(update, "message", None) or getattr(update, "edited_message", None)
-        if message and message.chat and message.chat.type in {"group", "supergroup"}:
+        message = getattr(update, "message", None)
+        if message and message.chat.type in {"group", "supergroup"}:
             try:
                 _save_known_chat(message.chat.id, message.chat.title or str(message.chat.id))
             except Exception:
