@@ -8,7 +8,6 @@ from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramForbiddenError
-from aiogram.filters import BaseFilter
 from aiogram.filters import Command
 from aiogram.types import (
     ChatJoinRequest,
@@ -498,187 +497,81 @@ def _ddx_match(text_value: str, words: list[str]) -> bool:
     return False
 
 
-class DdxWordFilter(BaseFilter):
-    async def __call__(self, message: Message) -> bool:
-        if message.chat.type not in {"group", "supergroup"}:
-            return False
-        text_value = message.text or message.caption
-        if not text_value:
-            return False
-        if not message.from_user or message.from_user.is_bot:
-            return False
-        payload = _ddx_get(message.chat.id)
-        if not payload or not payload.get("enabled"):
-            return False
-        words = payload.get("words", [])
-        if not isinstance(words, list) or not words:
-            return False
-        matched = _ddx_match(text_value, words)
-        if matched:
-            logger.warning(
-                "DDX_MATCH | chat_id=%s | user_id=%s",
-                message.chat.id,
-                message.from_user.id,
-            )
-        return matched
 
+async def ddx_preprocess_update(bot, update) -> bool:
+    message = getattr(update, "message", None) or getattr(update, "edited_message", None)
 
-@router.message(F.chat.type.in_({"group", "supergroup"}), DdxWordFilter())
-async def ddx_auto_delete(message: Message) -> None:
-    if not message.from_user:
-        return
+    if not message:
+        return False
+
+    if message.chat.type not in {"group", "supergroup"}:
+        return False
+
+    text_value = message.text or message.caption
+    if not text_value:
+        return False
+
+    if not message.from_user or message.from_user.is_bot:
+        return False
+
+    payload = _ddx_get(message.chat.id)
+    if not payload or not payload.get("enabled"):
+        return False
+
+    words = payload.get("words", [])
+    if not isinstance(words, list) or not words:
+        return False
+
+    if not _ddx_match(text_value, words):
+        return False
+
     try:
-        member = await message.bot.get_chat_member(
+        member = await bot.get_chat_member(
             message.chat.id,
             message.from_user.id,
         )
+
         if member.status in {"administrator", "creator"}:
-            return
+            logger.warning(
+                "DDX_SKIP_ADMIN | chat_id=%s | user_id=%s | message_id=%s",
+                message.chat.id,
+                message.from_user.id,
+                message.message_id,
+            )
+            return False
+
     except Exception:
         logger.exception(
-            "DDX_ADMIN_CHECK_FAILED | chat_id=%s | user_id=%s",
+            "DDX_ADMIN_CHECK_FAILED | chat_id=%s | user_id=%s | message_id=%s",
             message.chat.id,
             getattr(message.from_user, "id", None),
+            message.message_id,
         )
-        return
+        return False
+
     try:
-        await message.delete()
+        await bot.delete_message(
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+        )
+
         logger.warning(
             "DDX_DELETED | chat_id=%s | user_id=%s | message_id=%s",
             message.chat.id,
             message.from_user.id,
             message.message_id,
         )
+
+        return True
+
     except Exception:
         logger.exception(
             "DDX_DELETE_FAILED | chat_id=%s | user_id=%s | message_id=%s",
-            getattr(message, "chat", None) and message.chat.id,
+            message.chat.id,
             getattr(message.from_user, "id", None),
             message.message_id,
         )
-
-
-@router.chat_join_request()
-async def handle_join_request(event: ChatJoinRequest) -> None:
-    _ensure_join_requests_table()
-    _remember_group(event.chat.id, event.chat.title or str(event.chat.id))
-
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                """
-                INSERT INTO join_requests (user_id, chat_id, created_at)
-                VALUES (:user_id, :chat_id, :created_at)
-                """
-            ),
-            {
-                "user_id": event.from_user.id,
-                "chat_id": event.chat.id,
-                "created_at": datetime.now(timezone.utc),
-            },
-        )
-
-
-@router.my_chat_member()
-async def handle_my_chat_member(event: ChatMemberUpdated) -> None:
-    if event.chat.type in {"group", "supergroup"}:
-        _remember_group(event.chat.id, event.chat.title or str(event.chat.id))
-
-
-@router.message(Command("addgroup"))
-async def addgroup(message: Message) -> None:
-    if not _is_owner_private_message(message):
-        return
-
-    lines = _lines(message)
-    if len(lines) < 2:
-        await message.answer(
-            _error_text(
-                "formato incorreto",
-                "use:\n/addgroup\n<chat_id>\n<nome opcional>",
-            )
-        )
-        return
-
-    try:
-        chat_id = _parse_chat_id(lines[1])
-    except Exception:
-        await message.answer(
-            _error_text(
-                "chat_id inválido",
-                "envie um número válido, exemplo: -1001234567890",
-            )
-        )
-        return
-
-    manual_title = lines[2] if len(lines) >= 3 else None
-
-    try:
-        chat = await message.bot.get_chat(chat_id)
-        title = chat.title or manual_title or str(chat_id)
-        _remember_group(chat.id, title)
-        await message.answer(
-            _success_text(
-                "Grupo registrado.",
-                f"Grupo: {title}\nID: {chat.id}",
-            )
-        )
-    except Exception:
-        if manual_title:
-            _remember_group(chat_id, manual_title)
-            await message.answer(
-                _success_text(
-                    "Grupo registrado manualmente.",
-                    f"Grupo: {manual_title}\nID: {chat_id}",
-                )
-            )
-            return
-
-        await message.answer(
-            _error_text(
-                "não foi possível acessar o grupo",
-                "verifique se o bot está no grupo ou use:\n/addgroup\n<chat_id>\n<nome>",
-            )
-        )
-
-
-@router.message(Command("groups"))
-async def groups(message: Message) -> None:
-    if not _is_owner_private_message(message):
-        return
-
-    await message.answer(_format_known_groups())
-
-
-@router.message(Command("dx"))
-async def dx(message: Message) -> None:
-    if not _is_owner_private_message(message):
-        return
-
-    lines = _lines(message)
-
-    if len(lines) < 2:
-        await message.answer(
-            "Use:\n"
-            "/dx\n"
-            "<link_da_mensagem>\n"
-            "[outros links opcionais]"
-        )
-        return
-
-    success = 0
-    failed = 0
-
-    for link in lines[1:]:
-        try:
-            chat_id, message_id = _parse_message_link(link)
-            await message.bot.delete_message(chat_id, message_id)
-            success += 1
-        except Exception:
-            failed += 1
-            logger.exception("DX delete falhou | link=%s", link)
-
-    await message.answer(f"Resultado:\nApagadas: {success}\nFalhas: {failed}")
+        return False
 
 
 @router.message(Command("ddx"))

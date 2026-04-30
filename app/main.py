@@ -10,7 +10,7 @@ from sqlalchemy import text
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update
 
-from app.bot.private_tools import router as private_router
+from app.bot.private_tools import router as private_router, ddx_preprocess_update
 from app.handlers.lili_rodou import router as lili_rodou_router
 from app.handlers.plus import router as plus_router
 from app.bot.telegram import _register_handlers, shutdown_telegram_bot, bot_dispatcher
@@ -138,12 +138,19 @@ async def telegram_webhook(request: Request):
             logger.error("Bot não inicializado")
             return {"ok": True}
 
-        logger.info("WEBHOOK_RECEIVED | update_id=%s", update.update_id)
+        logger.warning("WEBHOOK_RECEIVED | update_id=%s", update.update_id)
 
         try:
-            await dispatcher.feed_update(bot, update)
+            ddx_deleted = await ddx_preprocess_update(bot, update)
         except Exception:
-            logger.exception("DISPATCHER_FAILED | update_id=%s", update.update_id)
+            logger.exception("DDX_PREPROCESS_FAILED | update_id=%s", update.update_id)
+            ddx_deleted = False
+
+        if not ddx_deleted:
+            try:
+                await dispatcher.feed_update(bot, update)
+            except Exception:
+                logger.exception("DISPATCHER_FAILED | update_id=%s", update.update_id)
 
         return {"ok": True}
 
