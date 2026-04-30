@@ -370,7 +370,7 @@ def _format_known_groups() -> str:
 
 
 def _parse_message_link(link: str) -> tuple[int, int]:
-    match = re.search(r"/c/(\d+)/(\d+)", link)
+    match = re.search(r"/c/(\d+)/(\d+)", link.strip())
     if not match:
         raise ValueError("link inválido")
 
@@ -472,8 +472,8 @@ async def groups(message: Message) -> None:
     await message.answer(_format_known_groups())
 
 
-@router.message(Command("dxx"))
-async def dxx(message: Message) -> None:
+@router.message(Command("dx"))
+async def dx(message: Message) -> None:
     if not _is_owner_private_message(message):
         return
 
@@ -482,7 +482,7 @@ async def dxx(message: Message) -> None:
     if len(lines) < 2:
         await message.answer(
             "Use:\n"
-            "/dxx\n"
+            "/dx\n"
             "<link_da_mensagem>\n"
             "[outros links opcionais]"
         )
@@ -498,7 +498,7 @@ async def dxx(message: Message) -> None:
             success += 1
         except Exception:
             failed += 1
-            logger.exception("Falha ao apagar mensagem: %s", link)
+            logger.exception("DX delete falhou | link=%s", link)
 
     await message.answer(f"Resultado:\nApagadas: {success}\nFalhas: {failed}")
 
@@ -1321,7 +1321,7 @@ async def hidden(message: Message) -> None:
     await message.answer(
         "COMANDOS ADMINISTRATIVOS\n\n"
         "MODERAÇÃO:\n"
-        "/dxx\n<link> — apaga mensagem diretamente via link\n\n"
+        "/dx\n<link_da_mensagem>\n[outros links opcionais] — apaga mensagens diretamente por link\n\n"
         "AÇÕES DIRETAS:\n"
         "/vx\n<chat_id>\n<user_id> — remover usuário (ban)\n\n"
         "/uv\n<chat_id>\n<user_id> — desbanir usuário\n\n"
