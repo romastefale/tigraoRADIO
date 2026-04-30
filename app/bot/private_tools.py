@@ -15,6 +15,9 @@ from aiogram.types import (
     ChatPermissions,
     Message,
     BufferedInputFile,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
 )
 from sqlalchemy import text
 
@@ -88,6 +91,21 @@ def _ensure_ddx_rules_table() -> None:
                     chat_id INTEGER PRIMARY KEY,
                     words TEXT,
                     enabled INTEGER,
+                    updated_at DATETIME
+                );
+                """
+            )
+        )
+
+
+def _ensure_known_chats_table() -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS known_chats (
+                    chat_id INTEGER PRIMARY KEY,
+                    title TEXT,
                     updated_at DATETIME
                 );
                 """
@@ -357,6 +375,48 @@ def _ddx_parse_words(raw: str) -> list[str]:
     return normalized
 
 
+def _save_known_chat(chat_id: int, title: str) -> None:
+    _ensure_known_chats_table()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO known_chats (chat_id, title, updated_at)
+                VALUES (:chat_id, :title, :updated_at)
+                ON CONFLICT(chat_id) DO UPDATE SET
+                    title = excluded.title,
+                    updated_at = excluded.updated_at
+                """
+            ),
+            {
+                "chat_id": chat_id,
+                "title": title,
+                "updated_at": datetime.now(timezone.utc),
+            },
+        )
+
+
+def _list_known_chats(limit: int = 10) -> list[tuple[int, str]]:
+    _ensure_known_chats_table()
+    with engine.begin() as conn:
+        rows = (
+            conn.execute(
+                text(
+                    """
+                    SELECT chat_id, title
+                    FROM known_chats
+                    ORDER BY updated_at DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": limit},
+            )
+            .mappings()
+            .all()
+        )
+    return [(int(r["chat_id"]), str(r["title"])) for r in rows]
+
+
 def _ddx_save(chat_id: int, words: list[str], enabled: bool = True) -> None:
     _ensure_ddx_rules_table()
     with engine.begin() as conn:
@@ -424,6 +484,31 @@ def _ddx_match(text_value: str, words: list[str]) -> bool:
             if spaced_word in spaced_text or compact_word in compact_text:
                 return True
     return False
+
+
+_ddx_user_state: dict[int, dict[str, object]] = {}
+_DDX_STATE_TTL = 300
+
+
+def _set_state(user_id: int, data: dict[str, object]) -> None:
+    data["ts"] = int(datetime.now(timezone.utc).timestamp())
+    _ddx_user_state[user_id] = data
+
+
+def _get_state(user_id: int) -> dict[str, object] | None:
+    data = _ddx_user_state.get(user_id)
+    if not data:
+        return None
+    ts = int(data.get("ts", 0))
+    now = int(datetime.now(timezone.utc).timestamp())
+    if now - ts > _DDX_STATE_TTL:
+        _ddx_user_state.pop(user_id, None)
+        return None
+    return data
+
+
+def _clear_state(user_id: int) -> None:
+    _ddx_user_state.pop(user_id, None)
 
 
 
@@ -591,6 +676,123 @@ async def ddx(message: Message) -> None:
     except Exception:
         logger.exception("DDX_COMMAND_FAILED")
         await message.answer("Erro ao processar /ddx.")
+
+
+@router.message(Command("dxmenu"))
+async def dxmenu(message: Message):
+    if not _is_owner_private_message(message):
+        return
+
+    chats = _list_known_chats(limit=10)
+    if not chats:
+        await message.answer("Nenhum grupo conhecido ainda. Interaja no grupo primeiro.")
+        return
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=title[:30], callback_data=f"ddx:select:{chat_id}")]
+            for chat_id, title in chats
+        ]
+    )
+    await message.answer("Escolha o grupo:", reply_markup=keyboard)
+
+
+@router.callback_query(F.data.startswith("ddx:select:"))
+async def ddx_select_group(call: CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+
+    chat_id = int(call.data.split(":")[2])
+    _set_state(call.from_user.id, {"chat_id": chat_id})
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Adicionar", callback_data="ddx:act:add")],
+            [InlineKeyboardButton(text="➖ Remover", callback_data="ddx:act:remove")],
+            [InlineKeyboardButton(text="📋 Listar", callback_data="ddx:act:list")],
+            [InlineKeyboardButton(text="🧪 Testar", callback_data="ddx:act:test")],
+            [InlineKeyboardButton(text="⛔ Desligar", callback_data="ddx:act:off")],
+        ]
+    )
+
+    await call.message.answer("Escolha a ação:", reply_markup=keyboard)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("ddx:act:"))
+async def ddx_select_action(call: CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        return
+
+    action = call.data.split(":")[2]
+    state = _get_state(call.from_user.id)
+    if not state:
+        await call.message.answer("Sessão expirada. Use /dxmenu novamente.")
+        await call.answer()
+        return
+
+    state["action"] = action
+    _set_state(call.from_user.id, state)
+
+    if action in {"add", "remove"}:
+        await call.message.answer("Envie apenas as palavras (ex: pipizinho, spam)")
+    elif action == "list":
+        await call.message.answer("Listando…")
+    elif action == "test":
+        await call.message.answer("Envie o texto para teste")
+    elif action == "off":
+        await call.message.answer("Confirmando desligamento…")
+
+    await call.answer()
+
+
+@router.message()
+async def ddx_menu_input_handler(message: Message):
+    if message.from_user.id != OWNER_ID:
+        return
+
+    state = _get_state(message.from_user.id)
+    if not state:
+        return
+
+    chat_id = int(state.get("chat_id"))
+    action = str(state.get("action", ""))
+
+    current = _ddx_get(chat_id) or {"words": [], "enabled": True}
+    current_words = current.get("words", []) if isinstance(current.get("words"), list) else []
+
+    if action == "add":
+        words = _ddx_parse_words(message.text or "")
+        if not words:
+            await message.answer("Nenhuma palavra válida.")
+            return
+        final_words = list(dict.fromkeys([str(w) for w in current_words] + words))
+        _ddx_save(chat_id, final_words, True)
+        await message.answer(f"Adicionado. Total: {len(final_words)}")
+        _clear_state(message.from_user.id)
+
+    elif action == "remove":
+        words = set(_ddx_parse_words(message.text or ""))
+        final_words = [str(w) for w in current_words if str(w) not in words]
+        _ddx_save(chat_id, final_words, True)
+        await message.answer(f"Atualizado. Total: {len(final_words)}")
+        _clear_state(message.from_user.id)
+
+    elif action == "list":
+        await message.answer(
+            f"Palavras:\n{', '.join(current_words) if current_words else 'nenhuma'}"
+        )
+        _clear_state(message.from_user.id)
+
+    elif action == "test":
+        matched = _ddx_match(message.text or "", [str(w) for w in current_words])
+        await message.answer("detectado" if matched else "não detectado")
+        _clear_state(message.from_user.id)
+
+    elif action == "off":
+        _ddx_save(chat_id, current_words, False)
+        await message.answer("DDX desligado")
+        _clear_state(message.from_user.id)
 
 
 @router.message(Command("rules"))

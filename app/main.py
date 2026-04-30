@@ -10,7 +10,7 @@ from sqlalchemy import text
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update
 
-from app.bot.private_tools import router as private_router, ddx_preprocess_update
+from app.bot.private_tools import router as private_router, ddx_preprocess_update, _save_known_chat
 from app.handlers.lili_rodou import router as lili_rodou_router
 from app.handlers.plus import router as plus_router
 from app.bot.telegram import _register_handlers, shutdown_telegram_bot, bot_dispatcher
@@ -139,6 +139,13 @@ async def telegram_webhook(request: Request):
             return {"ok": True}
 
         logger.warning("WEBHOOK_RECEIVED | update_id=%s", update.update_id)
+
+        message = getattr(update, "message", None) or getattr(update, "edited_message", None)
+        if message and message.chat and message.chat.type in {"group", "supergroup"}:
+            try:
+                _save_known_chat(message.chat.id, message.chat.title or str(message.chat.id))
+            except Exception:
+                logger.exception("KNOWN_CHAT_SAVE_FAILED | chat_id=%s", message.chat.id)
 
         try:
             ddx_deleted = await ddx_preprocess_update(bot, update)
