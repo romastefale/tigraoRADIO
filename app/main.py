@@ -134,9 +134,16 @@ async def telegram_webhook(request: Request):
 
         update = Update.model_validate(data, context={"bot": bot})
 
+        if bot is None:
+            logger.error("Bot não inicializado")
+            return {"ok": True}
+
         logger.info("WEBHOOK_RECEIVED | update_id=%s", update.update_id)
 
-        asyncio.create_task(_safe_process_update(update))
+        try:
+            await dispatcher.feed_update(bot, update)
+        except Exception:
+            logger.exception("DISPATCHER_FAILED | update_id=%s", update.update_id)
 
         return {"ok": True}
 
