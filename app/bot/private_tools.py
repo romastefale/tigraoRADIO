@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.exceptions import TelegramForbiddenError
+from aiogram.filters import BaseFilter
 from aiogram.filters import Command
 from aiogram.types import (
     ChatJoinRequest,
@@ -86,6 +88,22 @@ def _ensure_warns_table() -> None:
                     user_id INTEGER,
                     reason TEXT,
                     created_at DATETIME
+                );
+                """
+            )
+        )
+
+
+def _ensure_ddx_rules_table() -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS ddx_rules (
+                    chat_id INTEGER PRIMARY KEY,
+                    words TEXT,
+                    enabled INTEGER,
+                    updated_at DATETIME
                 );
                 """
             )
@@ -380,6 +398,166 @@ def _parse_message_link(link: str) -> tuple[int, int]:
     return chat_id, message_id
 
 
+def _ddx_normalize_spaced(value: str) -> str:
+    value = value.lower()
+    value = unicodedata.normalize("NFD", value)
+    value = "".join(c for c in value if unicodedata.category(c) != "Mn")
+    value = re.sub(r"[^a-z0-9]+", " ", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+
+def _ddx_normalize_compact(value: str) -> str:
+    value = value.lower()
+    value = unicodedata.normalize("NFD", value)
+    value = "".join(c for c in value if unicodedata.category(c) != "Mn")
+    value = re.sub(r"[^a-z0-9]+", "", value)
+    return value
+
+
+def _ddx_parse_words(raw: str) -> list[str]:
+    words = [item.strip() for item in re.split(r"[,;\n]", raw) if item.strip()]
+    normalized = []
+    seen = set()
+    for word in words:
+        clean = _ddx_normalize_spaced(word)
+        if not clean:
+            continue
+        if clean not in seen:
+            seen.add(clean)
+            normalized.append(clean)
+    return normalized
+
+
+def _ddx_save(chat_id: int, words: list[str], enabled: bool = True) -> None:
+    _ensure_ddx_rules_table()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO ddx_rules (chat_id, words, enabled, updated_at)
+                VALUES (:chat_id, :words, :enabled, :updated_at)
+                ON CONFLICT(chat_id) DO UPDATE SET
+                    words = excluded.words,
+                    enabled = excluded.enabled,
+                    updated_at = excluded.updated_at
+                """
+            ),
+            {
+                "chat_id": chat_id,
+                "words": json.dumps(words, ensure_ascii=False),
+                "enabled": 1 if enabled else 0,
+                "updated_at": datetime.now(timezone.utc),
+            },
+        )
+
+
+def _ddx_get(chat_id: int) -> dict[str, object] | None:
+    _ensure_ddx_rules_table()
+    with engine.begin() as conn:
+        row = (
+            conn.execute(
+                text(
+                    """
+                    SELECT words, enabled
+                    FROM ddx_rules
+                    WHERE chat_id = :chat_id
+                    """
+                ),
+                {"chat_id": chat_id},
+            )
+            .mappings()
+            .first()
+        )
+    if not row:
+        return None
+    try:
+        words = json.loads(str(row["words"] or "[]"))
+        if not isinstance(words, list):
+            words = []
+    except Exception:
+        logger.exception("DDX_LOAD_FAILED | chat_id=%s", chat_id)
+        words = []
+    return {"words": words, "enabled": bool(row["enabled"])}
+
+
+def _ddx_match(text_value: str, words: list[str]) -> bool:
+    spaced_text = _ddx_normalize_spaced(text_value)
+    compact_text = _ddx_normalize_compact(text_value)
+    for word in words:
+        spaced_word = _ddx_normalize_spaced(str(word))
+        compact_word = _ddx_normalize_compact(str(word))
+        if not spaced_word or not compact_word:
+            continue
+        if " " in spaced_word:
+            if spaced_word in spaced_text:
+                return True
+        else:
+            if spaced_word in spaced_text or compact_word in compact_text:
+                return True
+    return False
+
+
+class DdxWordFilter(BaseFilter):
+    async def __call__(self, message: Message) -> bool:
+        if message.chat.type not in {"group", "supergroup"}:
+            return False
+        text_value = message.text or message.caption
+        if not text_value:
+            return False
+        if not message.from_user or message.from_user.is_bot:
+            return False
+        payload = _ddx_get(message.chat.id)
+        if not payload or not payload.get("enabled"):
+            return False
+        words = payload.get("words", [])
+        if not isinstance(words, list) or not words:
+            return False
+        matched = _ddx_match(text_value, words)
+        if matched:
+            logger.warning(
+                "DDX_MATCH | chat_id=%s | user_id=%s",
+                message.chat.id,
+                message.from_user.id,
+            )
+        return matched
+
+
+@router.message(F.chat.type.in_({"group", "supergroup"}), DdxWordFilter())
+async def ddx_auto_delete(message: Message) -> None:
+    if not message.from_user:
+        return
+    try:
+        member = await message.bot.get_chat_member(
+            message.chat.id,
+            message.from_user.id,
+        )
+        if member.status in {"administrator", "creator"}:
+            return
+    except Exception:
+        logger.exception(
+            "DDX_ADMIN_CHECK_FAILED | chat_id=%s | user_id=%s",
+            message.chat.id,
+            getattr(message.from_user, "id", None),
+        )
+        return
+    try:
+        await message.delete()
+        logger.warning(
+            "DDX_DELETED | chat_id=%s | user_id=%s | message_id=%s",
+            message.chat.id,
+            message.from_user.id,
+            message.message_id,
+        )
+    except Exception:
+        logger.exception(
+            "DDX_DELETE_FAILED | chat_id=%s | user_id=%s | message_id=%s",
+            getattr(message, "chat", None) and message.chat.id,
+            getattr(message.from_user, "id", None),
+            message.message_id,
+        )
+
+
 @router.chat_join_request()
 async def handle_join_request(event: ChatJoinRequest) -> None:
     _ensure_join_requests_table()
@@ -501,6 +679,96 @@ async def dx(message: Message) -> None:
             logger.exception("DX delete falhou | link=%s", link)
 
     await message.answer(f"Resultado:\nApagadas: {success}\nFalhas: {failed}")
+
+
+@router.message(Command("ddx"))
+async def ddx(message: Message) -> None:
+    if not _is_owner_private_message(message):
+        return
+
+    lines = _lines(message)
+    if len(lines) < 3:
+        await message.answer(
+            "Use:\n"
+            "/ddx\n"
+            "<chat_id>\n"
+            "<add|remove|list|off|test>\n"
+            "<palavras ou texto>"
+        )
+        return
+
+    try:
+        chat_id = _parse_chat_id(lines[1])
+        mode = lines[2].strip().lower()
+        current = _ddx_get(chat_id) or {"words": [], "enabled": True}
+        current_words = current.get("words", [])
+        if not isinstance(current_words, list):
+            current_words = []
+
+        if mode == "list":
+            await message.answer(
+                "DDX\n"
+                f"Grupo: {chat_id}\n"
+                f"Status: {'ativo' if current.get('enabled') else 'inativo'}\n"
+                f"Palavras: {', '.join(str(word) for word in current_words) if current_words else 'nenhuma'}"
+            )
+            return
+
+        if mode == "off":
+            _ddx_save(chat_id, current_words, enabled=False)
+            await message.answer(f"DDX desligado.\nGrupo: {chat_id}")
+            return
+
+        if mode == "add":
+            if len(lines) < 4:
+                await message.answer("Informe as palavras para adicionar.")
+                return
+            incoming = _ddx_parse_words("\n".join(lines[3:]))
+            if not incoming:
+                await message.answer("Nenhuma palavra válida informada.")
+                return
+            final_words = list(dict.fromkeys([str(w) for w in current_words] + incoming))
+            _ddx_save(chat_id, final_words, enabled=True)
+            await message.answer(
+                "DDX atualizado.\n"
+                f"Grupo: {chat_id}\n"
+                "Status: ativo\n"
+                f"Total de palavras: {len(final_words)}"
+            )
+            return
+
+        if mode == "remove":
+            if len(lines) < 4:
+                await message.answer("Informe as palavras para remover.")
+                return
+            remove_words = set(_ddx_parse_words("\n".join(lines[3:])))
+            final_words = [str(w) for w in current_words if str(w) not in remove_words]
+            _ddx_save(chat_id, final_words, enabled=True)
+            await message.answer(
+                "DDX atualizado.\n"
+                f"Grupo: {chat_id}\n"
+                "Status: ativo\n"
+                f"Total de palavras: {len(final_words)}"
+            )
+            return
+
+        if mode == "test":
+            if len(lines) < 4:
+                await message.answer("Informe o texto para teste.")
+                return
+            test_text = "\n".join(lines[3:])
+            matched = _ddx_match(test_text, [str(w) for w in current_words])
+            await message.answer(
+                "DDX TESTE\n"
+                f"Grupo: {chat_id}\n"
+                f"Resultado: {'detectado' if matched else 'não detectado'}"
+            )
+            return
+
+        await message.answer("Modo inválido. Use add, remove, list, off ou test.")
+    except Exception:
+        logger.exception("DDX_COMMAND_FAILED")
+        await message.answer("Erro ao processar /ddx.")
 
 
 @router.message(Command("rules"))
@@ -1322,6 +1590,7 @@ async def hidden(message: Message) -> None:
         "COMANDOS ADMINISTRATIVOS\n\n"
         "MODERAÇÃO:\n"
         "/dx\n<link_da_mensagem>\n[outros links opcionais] — apaga mensagens diretamente por link\n\n"
+        "/ddx\n<chat_id>\n<add|remove|list|off|test>\n<palavras ou texto> — filtro automático silencioso por palavras\n\n"
         "AÇÕES DIRETAS:\n"
         "/vx\n<chat_id>\n<user_id> — remover usuário (ban)\n\n"
         "/uv\n<chat_id>\n<user_id> — desbanir usuário\n\n"
