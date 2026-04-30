@@ -45,20 +45,6 @@ def _ensure_join_requests_table() -> None:
         )
 
 
-def _ensure_known_groups_table() -> None:
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS known_groups (
-                    chat_id INTEGER PRIMARY KEY,
-                    title TEXT,
-                    updated_at DATETIME
-                );
-                """
-            )
-        )
-
 
 def _ensure_group_rules_table() -> None:
     with engine.begin() as conn:
@@ -111,7 +97,6 @@ def _ensure_ddx_rules_table() -> None:
 
 def _ensure_all_tables() -> None:
     _ensure_join_requests_table()
-    _ensure_known_groups_table()
     _ensure_group_rules_table()
     _ensure_warns_table()
 
@@ -174,49 +159,6 @@ def _parse_created_at(value: object) -> datetime | None:
         return parsed.astimezone(timezone.utc)
 
     return None
-
-
-def _remember_group(chat_id: int, title: str | None) -> None:
-    _ensure_known_groups_table()
-
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                """
-                INSERT INTO known_groups (chat_id, title, updated_at)
-                VALUES (:chat_id, :title, :updated_at)
-                ON CONFLICT(chat_id) DO UPDATE SET
-                    title = excluded.title,
-                    updated_at = excluded.updated_at
-                """
-            ),
-            {
-                "chat_id": chat_id,
-                "title": title or str(chat_id),
-                "updated_at": datetime.now(timezone.utc),
-            },
-        )
-
-
-def _get_known_groups() -> list[dict[str, object]]:
-    _ensure_known_groups_table()
-
-    with engine.begin() as conn:
-        rows = (
-            conn.execute(
-                text(
-                    """
-                    SELECT chat_id, title, updated_at
-                    FROM known_groups
-                    ORDER BY updated_at DESC
-                    """
-                )
-            )
-            .mappings()
-            .all()
-        )
-
-    return [dict(row) for row in rows]
 
 
 def _save_rule(chat_id: int, rule_type: str, payload: dict[str, object]) -> None:
@@ -371,19 +313,6 @@ def _parse_chat_id(value: str) -> int:
 
 def _parse_user_id(value: str) -> int:
     return int(value.strip())
-
-
-def _format_known_groups() -> str:
-    groups = _get_known_groups()
-
-    if not groups:
-        return "Nenhum grupo registrado."
-
-    output = ["GRUPOS REGISTRADOS\n"]
-    for group in groups:
-        output.append(f"{group['chat_id']} — {group.get('title') or group['chat_id']}")
-
-    return "\n".join(output)
 
 
 def _parse_message_link(link: str) -> tuple[int, int]:
@@ -716,7 +645,6 @@ async def mx1(message: Message) -> None:
             member_limit=1,
             expire_date=datetime.now(timezone.utc) + SINGLE_USE_EXPIRY,
         )
-        _remember_group(chat_id, str(chat_id))
         await message.answer(
             _success_text(
                 "Link de entrada direta gerado.",
@@ -762,7 +690,6 @@ async def mx2(message: Message) -> None:
             chat_id=chat_id,
             creates_join_request=True,
         )
-        _remember_group(chat_id, str(chat_id))
         await message.answer(
             _success_text(
                 "Link de solicitação de entrada gerado.",
@@ -901,7 +828,6 @@ async def joinx(message: Message) -> None:
             },
         )
 
-    _remember_group(chat_id, str(chat_id))
     await message.answer(
         _success_text(
             "Usuário aprovado.",
@@ -931,7 +857,6 @@ async def vx(message: Message) -> None:
         chat_id = _parse_chat_id(lines[1])
         user_id = _parse_user_id(lines[2])
         await _execute_action(message.bot, chat_id, user_id, "vanish")
-        _remember_group(chat_id, str(chat_id))
         await _notify_owner(message.bot, chat_id, f"Vanish executado | user_id={user_id}")
         await message.answer(
             _success_text(
@@ -977,7 +902,6 @@ async def uv(message: Message) -> None:
         chat_id = _parse_chat_id(lines[1])
         user_id = _parse_user_id(lines[2])
         await _execute_action(message.bot, chat_id, user_id, "unvanish")
-        _remember_group(chat_id, str(chat_id))
         await _notify_owner(message.bot, chat_id, f"Unvanish executado | user_id={user_id}")
         await message.answer(
             _success_text(
@@ -1078,68 +1002,6 @@ async def mx(message: Message) -> None:
         )
 
 
-@router.message(Command("ovbx"))
-async def ovbx(message: Message) -> None:
-    if not _is_owner_private_message(message):
-        return
-
-    lines = _lines(message)
-    if len(lines) < 4:
-        await message.answer(
-            "Título: Painel direto de moderação\n"
-            "Descrição: Executa ação direta sem depender de sessão.\n\n"
-            "Use:\n"
-            "/ovbx\n"
-            "<chat_id>\n"
-            "<user_id>\n"
-            "<vanish|unvanish|mute>\n"
-            "<minutos opcional para mute>"
-        )
-        return
-
-    try:
-        chat_id = _parse_chat_id(lines[1])
-        user_id = _parse_user_id(lines[2])
-        action = lines[3].strip().lower()
-
-        if action not in {"vanish", "unvanish", "mute"}:
-            await message.answer(
-                _error_text(
-                    "ação inválida",
-                    "use vanish, unvanish ou mute",
-                )
-            )
-            return
-
-        minutes = int(lines[4]) if action == "mute" and len(lines) >= 5 else 10
-        minutes = max(1, min(minutes, 120))
-
-        await _execute_action(message.bot, chat_id, user_id, action, minutes)
-        _remember_group(chat_id, str(chat_id))
-        await _notify_owner(message.bot, chat_id, f"Ação executada: {action} | user_id={user_id}")
-        await message.answer(
-            _success_text(
-                "Ação executada.",
-                f"Grupo: {chat_id}\nUsuário: {user_id}\nAção: {action}",
-            )
-        )
-    except TelegramForbiddenError:
-        await message.answer(
-            _error_text(
-                "operação não permitida",
-                "verifique se o bot é administrador e possui permissões suficientes",
-            )
-        )
-    except Exception:
-        logger.exception("Falha no ovbx")
-        await message.answer(
-            _error_text(
-                "falha na execução",
-                "verifique chat_id, user_id, ação e permissões do bot",
-            )
-        )
-
-
 @router.message(Command("lgx"))
 async def lgx(message: Message) -> None:
     if not _is_owner_private_message(message):
@@ -1172,7 +1034,6 @@ async def lgx(message: Message) -> None:
 
         enabled = value in {"on", "true", "1", "sim"}
         _save_rule(chat_id, "notify", {"enabled": enabled})
-        _remember_group(chat_id, str(chat_id))
 
         await message.answer(
             _success_text(
@@ -1495,14 +1356,10 @@ async def hidden(message: Message) -> None:
         "3d = dias\n"
         "i = indefinido\n"
         "x = desmutar\n\n"
-        "/ovbx\n<chat_id>\n<user_id>\n<vanish|unvanish|mute>\n[minutos] — ação manual completa\n\n"
         "ACESSO:\n"
         "/mx1\n<chat_id> — gerar link direto\n\n"
         "/mx2\n<chat_id> — gerar link com aprovação\n\n"
         "/joinx\n<chat_id>\n<user_id> — aprovar entrada manual\n\n"
-        "GRUPOS:\n"
-        "/addgroup\n<chat_id>\n[nome] — registrar grupo\n\n"
-        "/groups — listar grupos\n\n"
         "SISTEMA:\n"
         "/hidden — exibir comandos\n"
     )
